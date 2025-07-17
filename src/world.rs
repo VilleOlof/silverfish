@@ -16,6 +16,7 @@ pub enum Dimension {
     Overworld,
     Nether,
     End,
+    Other(String),
 }
 
 impl Dimension {
@@ -24,6 +25,7 @@ impl Dimension {
             Dimension::Overworld => world_path.to_path_buf(),
             Dimension::Nether => world_path.join("DIM-1"),
             Dimension::End => world_path.join("DIM1"),
+            Dimension::Other(dim) => world_path.join(dim),
         };
         // all of them end with /region
         path.join("region")
