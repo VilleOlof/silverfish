@@ -1,6 +1,6 @@
-use fastnbt::{ByteArray, LongArray, Value, from_value, to_value};
+use fastnbt::{LongArray, Value, from_value};
 use mca::{RegionReader, RegionWriter};
-use serde::{Deserialize, Serialize};
+use rust_edit::nbt::{Block, Section};
 use std::{collections::HashMap, io::Read, ops::Deref, path::PathBuf};
 
 #[derive(Debug)]
@@ -9,7 +9,7 @@ struct ModifyOperation {
     region: (usize, usize),
     chunk: (usize, usize),
     coordinates: (usize, usize, usize),
-    block: BlockPalette,
+    block: Block,
 }
 
 impl ModifyOperation {
@@ -211,133 +211,13 @@ impl ModifyOperation {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct Section {
-    #[serde(rename = "SkyLight", default = "byte_array_default")]
-    sky_light: ByteArray,
-    #[serde(rename = "BlockLight", default = "byte_array_default")]
-    block_light: ByteArray,
-    #[serde(rename = "Y")]
-    y: i8,
-    biomes: Biomes,
-    block_states: BlockStates,
-}
-
-impl Section {
-    fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if !self.sky_light.is_empty() {
-            map.insert("SkyLight".into(), Value::ByteArray(self.sky_light));
-        }
-        if !self.block_light.is_empty() {
-            map.insert("BlockLight".into(), Value::ByteArray(self.block_light));
-        }
-        map.insert("Y".into(), Value::Byte(self.y));
-        map.insert("biomes".into(), self.biomes.to_value());
-        map.insert("block_states".into(), self.block_states.to_value());
-
-        Value::Compound(map)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Biomes {
-    #[serde(default = "long_array_default")]
-    data: LongArray,
-    #[serde(default)]
-    palette: Vec<String>,
-}
-
-impl Biomes {
-    fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if !self.data.is_empty() {
-            map.insert("data".into(), Value::LongArray(self.data));
-        }
-        map.insert("palette".into(), to_value(self.palette).unwrap());
-
-        Value::Compound(map)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct BlockStates {
-    #[serde(default = "long_array_default")]
-    data: LongArray,
-    #[serde(default)]
-    palette: Vec<BlockPalette>,
-}
-
-impl BlockStates {
-    fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if !self.data.is_empty() {
-            map.insert("data".into(), Value::LongArray(self.data));
-        }
-        map.insert(
-            "palette".into(),
-            to_value(
-                self.palette
-                    .iter()
-                    .map(|p| p.clone().to_value())
-                    .collect::<Vec<Value>>(),
-            )
-            .unwrap(),
-        );
-
-        Value::Compound(map)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
-struct BlockPalette {
-    #[serde(rename = "Name")]
-    name: String,
-    #[serde(rename = "Properties", default)]
-    properties: HashMap<String, String>,
-}
-
-impl BlockPalette {
-    fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if !self.properties.is_empty() {
-            map.insert("Properties".into(), self.properties_to_value());
-        }
-        map.insert("Name".into(), Value::String(self.name));
-
-        Value::Compound(map)
-    }
-
-    fn properties_to_value(&self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        for (key, value) in &self.properties {
-            map.insert(key.to_string(), Value::String(value.to_string()));
-        }
-
-        Value::Compound(map)
-    }
-}
-
-fn byte_array_default() -> ByteArray {
-    ByteArray::new(vec![])
-}
-
-fn long_array_default() -> LongArray {
-    LongArray::new(vec![])
-}
-
 fn main() {
     let op = ModifyOperation {
         world_path: PathBuf::from(""),
         region: (0, 0),
         chunk: (0, 0),
         coordinates: (12, 111, 5),
-        block: BlockPalette {
+        block: Block {
             name: String::from("minecraft:bedrock"),
             properties: HashMap::new(),
         },
