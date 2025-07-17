@@ -75,9 +75,9 @@ checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
 
 [[package]]
 name = "mca"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d98c53215a1c4630f9e9a8d1fdfedf4ec71afefd6ea91e217534927d92859c"
+checksum = "869613b66532fe227e180d61dfbccfa4fd0c5fcc768ce36a29f11a4a57fe29b0"
 dependencies = [
  "lz4-java-wrc",
  "miniz_oxide",

@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct World {
-    path: PathBuf,
-    operations: Vec<OperationData>,
+    pub path: PathBuf,
+    #[cfg(feature = "spigot")]
+    pub world_name: String,
+    pub operations: Vec<OperationData>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -20,12 +22,31 @@ pub enum Dimension {
 }
 
 impl Dimension {
-    pub fn path(&self, world_path: &Path) -> PathBuf {
+    #[cfg(not(feature = "spigot"))]
+    pub fn path(&self, path: &Path) -> PathBuf {
         let path = match self {
-            Dimension::Overworld => world_path.to_path_buf(),
-            Dimension::Nether => world_path.join("DIM-1"),
-            Dimension::End => world_path.join("DIM1"),
-            Dimension::Custom(dim) => world_path.join(dim),
+            Dimension::Overworld => path.to_path_buf(),
+            Dimension::Nether => path.join("DIM-1"),
+            Dimension::End => path.join("DIM1"),
+            Dimension::Custom(dim) => path.join(dim),
+        };
+
+        // append /region to default vanilla dimensions
+        // so Custom can be whatever folder within the world
+        if let Dimension::Custom(_) = self {
+            path
+        } else {
+            path.join("region")
+        }
+    }
+
+    #[cfg(feature = "spigot")]
+    pub fn path(&self, path: &Path, world_name: &str) -> PathBuf {
+        let path = match self {
+            Dimension::Overworld => path.to_path_buf(),
+            Dimension::Nether => path.join(format!("{world_name}_nether")).join("DIM-1"),
+            Dimension::End => path.join(format!("{world_name}_the_end")).join("DIM1"),
+            Dimension::Custom(dim) => path.join(dim),
         };
 
         // append /region to default vanilla dimensions
@@ -39,12 +60,26 @@ impl Dimension {
 }
 
 impl World {
+    #[cfg(not(feature = "spigot"))]
     pub fn new<P>(world_path: P) -> Self
     where
         P: AsRef<Path>,
     {
         Self {
             path: world_path.as_ref().to_path_buf(),
+            operations: vec![],
+        }
+    }
+
+    #[cfg(feature = "spigot")]
+    pub fn new<P, N>(world_path: P, world_name: N) -> Self
+    where
+        P: AsRef<Path>,
+        N: AsRef<str>,
+    {
+        Self {
+            path: world_path.as_ref().to_path_buf(),
+            world_name: world_name.as_ref().to_string(),
             operations: vec![],
         }
     }

@@ -1,4 +1,10 @@
-use crate::{coordinate::Coordinate, nbt::Block, world::Dimension};
+use std::path::PathBuf;
+
+use crate::{
+    coordinate::Coordinate,
+    nbt::Block,
+    world::{Dimension, World},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationData {
@@ -17,4 +23,16 @@ pub enum Operation {
         to: Coordinate,
         block: Block,
     },
+}
+
+impl OperationData {
+    #[cfg(not(feature = "spigot"))]
+    pub fn region_path(&self, world: &World) -> PathBuf {
+        self.dimension.path(&world.path)
+    }
+
+    #[cfg(feature = "spigot")]
+    pub fn region_path(&self, world: &World) -> PathBuf {
+        self.dimension.path(&world.path, &world.world_name)
+    }
 }
