@@ -136,14 +136,12 @@ impl ModifyOperation {
 
         let mut state = section.block_states;
 
-        // FIXME: possibily of too small palette .trailing_zeros() is only 32bit, while data bits can be upto 64
         let bit_count: u32 = state
             .palette
             .len()
             .next_power_of_two()
             .trailing_zeros()
             .max(4);
-        //println!("Bit count for palette: {bit_count}");
 
         let mut old_indexes: Vec<i64> = Vec::new();
 
@@ -160,6 +158,7 @@ impl ModifyOperation {
         }
         old_indexes.truncate(4096);
 
+
         if state.palette.contains(&self.block) {
             println!("Block already exists in palette, skipping palette modification.");
         } else {
@@ -172,12 +171,30 @@ impl ModifyOperation {
             self.coordinates.2 as i64 % 16,
         );
 
-        //println!("Coordinates: ({}, {}, {})", x, y, z);
-
         let index = x + z * 16 + y * 16 * 16;
 
         old_indexes[index as usize] =
             state.palette.iter().position(|b| b == &self.block).unwrap() as i64;
+
+        // remove unused blocks from the palette
+        // ugly but works
+        let mut unused_indexes = Vec::new();
+        for (idx, _p) in state.palette.iter().enumerate() {
+            if old_indexes.contains(&(idx as i64)) {
+                continue;
+            }
+
+            unused_indexes.push(idx as i64);
+        }
+
+        for index in unused_indexes.iter().rev() {
+            state.palette.remove(*index as usize);
+            for block in old_indexes.iter_mut() {
+                if *block > *index {
+                    *block -= 1;
+                }
+            }
+        }
 
         let mut new_blockdata = vec![];
         let bit_count: u32 = state
@@ -186,6 +203,7 @@ impl ModifyOperation {
             .next_power_of_two()
             .trailing_zeros()
             .max(4);
+
         let mut offset = 0;
         let mut currrent_long: i64 = 0;
         for block in old_indexes.iter() {
@@ -202,8 +220,6 @@ impl ModifyOperation {
         if offset > 0 {
             new_blockdata.push(currrent_long);
         }
-
-        //println!("Output data length: {}", output_data.len());
 
         state.data = LongArray::new(new_blockdata);
         section.block_states = state;
