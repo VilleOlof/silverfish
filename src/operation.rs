@@ -36,3 +36,20 @@ impl OperationData {
         self.dimension.path(&world.path, &world.world_name)
     }
 }
+
+impl Operation {
+    pub fn get_coordinate(&self) -> Coordinate {
+        (match self {
+            Self::Setblock {
+                coordinate,
+                block: _,
+            } => coordinate,
+            Self::Fill {
+                from,
+                to: _,
+                block: _,
+            } => from,
+        })
+        .clone()
+    }
+}
