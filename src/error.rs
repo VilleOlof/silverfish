@@ -11,8 +11,12 @@ pub enum RustEditError {
     MismatchedCoordinateType(Coordinate),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+    #[error("{0}")]
+    WorldError(String),
     #[error("mca failed: {0}")]
     McaError(#[from] McaError),
+    #[error("nbt failed: {0}")]
+    NbtError(#[from] fastnbt::error::Error),
     #[error("io failed: {0}")]
     IoError(#[from] io::Error),
 }

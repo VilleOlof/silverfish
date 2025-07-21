@@ -42,6 +42,10 @@ impl Coordinate {
         self.value.2
     }
 
+    pub fn as_command_format(&self) -> String {
+        format!("{} {} {}", self.x(), self.y(), self.z())
+    }
+
     pub fn normalize(&self) -> Self {
         match self._type {
             CoordinateType::Default => self.clone(),

@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use fastnbt::{ByteArray, LongArray, Value, to_value};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+use crate::error::RustEditError;
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct Section {
     #[serde(rename = "SkyLight", default = "byte_array_default")]
     pub sky_light: ByteArray,
@@ -31,9 +33,38 @@ impl Section {
 
         Value::Compound(map)
     }
+
+    pub fn get_from_idx(sections: &Value, idx: isize) -> Result<Self, RustEditError> {
+        match sections {
+            Value::List(sects) => {
+                for s_v in sects {
+                    match s_v {
+                        Value::Compound(c)
+                            if c.get("Y").ok_or(RustEditError::WorldError(
+                                "No Y value in section".into(),
+                            ))? == idx =>
+                        {
+                            let section = fastnbt::from_value(s_v)?;
+                            return Ok(section);
+                        }
+                        _ => {
+                            return Err(RustEditError::WorldError(
+                                "section isn't a compound".into(),
+                            ));
+                        }
+                    }
+                }
+            }
+            _ => return Err(RustEditError::WorldError("sections isn't a list".into())),
+        }
+
+        Err(RustEditError::WorldError(
+            "no section found with a valid index".into(),
+        ))
+    }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Biomes {
     #[serde(default = "long_array_default")]
     pub data: LongArray,
@@ -54,7 +85,7 @@ impl Biomes {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BlockStates {
     #[serde(default = "long_array_default")]
     pub data: LongArray,
