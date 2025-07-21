@@ -3,7 +3,7 @@ use mca::RegionReader;
 use crate::{
     coordinate::Coordinate,
     error::RustEditError,
-    operation::{Operation, OperationData},
+    operation::{Operation, OperationData, SplitUnit},
 };
 use std::{
     collections::HashMap,
@@ -121,41 +121,67 @@ impl World {
     }
 
     pub fn flush(&mut self) -> Result<(), RustEditError> {
-        // iterate over all operations and actually unpack the data, place all changes
-        // and then pack it in and write the data?
-        //
-        // one big issue im seeing is if lets say a fill operation spans multiple chunks, even regions?
-        // for setblocks at least, you could arrange them into a HashMap<(region_x, region_z), OperationData>
-        // and batch update a single region with all possible setblocks
-        //
-        // fill operation (and other operations in the future) that spans multiple chunk/regions
-        // you could take the first few chunks in a region etc and operate on them and possibly
-        // calculate a operation that would fill out the remaining area and push that into the operations
-        // so the main "for op in self.operations" would continue and continue until its all done
-
-        let groups = World::group_by_region(self.operations.iter().collect());
-
-        // depending on how the overlapping issue gets handled, this could even get multithreaded??
-        for region in groups {
-            let (dimension, region_coords, operations) = (
-                region.dimension,
-                region.region_coordinate,
-                region.operations,
-            );
-            // also a nit-pick from myself to myself, a bit odd to have region path from the Dimension path but path-wise it makes sense for its grouping
-            #[cfg(not(feature = "spigot"))]
-            let region_path = dimension.path(&self.path);
-            #[cfg(feature = "spigot")]
-            let region_path = dimension.path(&self.path, &self.world_name);
-
-            let mut region_buf = vec![];
-            let region_data = File::open(&region_path)?.read_to_end(&mut region_buf)?;
-            let region = RegionReader::new(&region_buf)?;
-
-            // here group this specific "operations" into a "group_by_chunk"
-            // to handle each and every chunk in a single batch
-            // (and again as mentioned above we have the issue of overlapping fill operations across chunk/region boundaries)
+        let mut operations: Vec<OperationData> = vec![];
+        for operation in &self.operations {
+            match &operation.operation {
+                // setblocks cant be spanned across multiple areas so just as
+                Operation::Setblock {
+                    coordinate: _,
+                    block: _,
+                } => operations.push(operation.clone()),
+                Operation::Fill {
+                    from: _,
+                    to: _,
+                    block: _,
+                } => {
+                    // resolve fill that spans multiple regions/chunks/sections into sections
+                    let mut section: Vec<OperationData> =
+                        Operation::split_fill_into(&operation.operation, SplitUnit::Region)?
+                            .iter()
+                            .map(|r| Operation::split_fill_into(&r, SplitUnit::Chunk))
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .flatten()
+                            .map(|c| Operation::split_fill_into(&c, SplitUnit::Section))
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .flatten()
+                            .map(|o| OperationData {
+                                dimension: operation.dimension.clone(),
+                                operation: o,
+                            })
+                            .collect();
+                    operations.append(&mut section);
+                }
+            }
         }
+        println!("{:#?}", operations);
+
+        // TODO group operations into regions>chunks>sections
+        // do this before we can go back to the loop and region parsing
+        // so we only ever load a region one time
+
+        // // depending on how the overlapping issue gets handled, this could even get multithreaded??
+        // for region in groups {
+        //     let (dimension, region_coords, operations) = (
+        //         region.dimension,
+        //         region.region_coordinate,
+        //         region.operations,
+        //     );
+        //     // also a nit-pick from myself to myself, a bit odd to have region path from the Dimension path but path-wise it makes sense for its grouping
+        //     #[cfg(not(feature = "spigot"))]
+        //     let region_path = dimension.path(&self.path);
+        //     #[cfg(feature = "spigot")]
+        //     let region_path = dimension.path(&self.path, &self.world_name);
+
+        //     let mut region_buf = vec![];
+        //     let region_data = File::open(&region_path)?.read_to_end(&mut region_buf)?;
+        //     let region = RegionReader::new(&region_buf)?;
+
+        //     // here group this specific "operations" into a "group_by_chunk"
+        //     // to handle each and every chunk in a single batch
+        //     // (and again as mentioned above we have the issue of overlapping fill operations across chunk/region boundaries)
+        // }
 
         Ok(())
     }
@@ -165,7 +191,7 @@ impl World {
         let mut groups: HashMap<(Coordinate, Dimension), Vec<OperationData>> = HashMap::new();
 
         for data in operations {
-            let region_coords = data.operation.get_coordinate().as_region();
+            let region_coords = data.operation.get_init_coords().as_region();
             let dimension = data.dimension.clone();
 
             let entry = groups.get_mut(&(region_coords.clone(), dimension.clone()));

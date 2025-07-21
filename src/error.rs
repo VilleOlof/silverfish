@@ -9,6 +9,8 @@ use crate::coordinate::Coordinate;
 pub enum RustEditError {
     #[error("Failed to convert coordinate to another type")]
     MismatchedCoordinateType(Coordinate),
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
     #[error("mca failed: {0}")]
     McaError(#[from] McaError),
     #[error("io failed: {0}")]
