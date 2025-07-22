@@ -57,13 +57,13 @@ impl Coordinate {
             ),
             CoordinateType::Chunk => Self::new_with_type(
                 Coordinate::mc(self.value.0, 16f64),
-                Coordinate::mc(self.value.1, 16f64),
+                Coordinate::mc(0, 16f64), // //TODO chunk should never have y?
                 Coordinate::mc(self.value.2, 16f64),
                 CoordinateType::Default,
             ),
             CoordinateType::Region => Self::new_with_type(
                 Coordinate::mc(Coordinate::mc(self.value.0, 32f64), 16f64),
-                Coordinate::mc(Coordinate::mc(self.value.1, 32f64), 16f64),
+                Coordinate::mc(Coordinate::mc(0, 32f64), 16f64), //TODO region should never have y?
                 Coordinate::mc(Coordinate::mc(self.value.2, 32f64), 16f64),
                 CoordinateType::Default,
             ),
@@ -91,7 +91,7 @@ impl Coordinate {
         let c = self.normalize();
         Self::new_with_type(
             Coordinate::dc(c.value.0, 16f64),
-            Coordinate::dc(c.value.1, 16f64),
+            Coordinate::dc(0, 16f64), //TODO chunk should never have y?
             Coordinate::dc(c.value.2, 16f64),
             CoordinateType::Chunk,
         )
@@ -103,7 +103,7 @@ impl Coordinate {
         let chunk = c.as_chunk().inner();
         Self::new_with_type(
             Coordinate::dc(chunk.0, 32f64),
-            Coordinate::dc(chunk.1, 32f64),
+            Coordinate::dc(0, 32f64), //TODO region should never have y?
             Coordinate::dc(chunk.2, 32f64),
             CoordinateType::Region,
         )

@@ -8,12 +8,7 @@ use crate::{
     operation::{Operation, OperationData, SplitUnit},
 };
 use std::{
-    collections::HashMap,
-    fs::{self, File},
-    io::Read,
-    ops::Deref,
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    collections::HashMap, fs::{self, File}, io::Read, ops::Deref, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}
 };
 
 /// A Minecraft "World"
@@ -268,6 +263,11 @@ impl World {
                     }
                     old_indexes.truncate(4096);
 
+                    //populate empty sections
+                    if old_indexes.len() == 0 {
+                        old_indexes = vec![0; 4096];
+                    }
+
                     // modify, run operations
                     // these operations are 100% to be within this exact same section
                     for operation in operations {
@@ -316,12 +316,13 @@ impl World {
                                 let end_y = from_y.max(to_y);
                                 let end_z = from_z.max(to_z);
 
-
+                                /*
                                 println!("section = {}", section.y);
                                 println!(
                                     "start = ({}, {}, {}), end = ({}, {}, {}), block = {:?}",
                                     start_x, start_y, start_z, end_x, end_y, end_z, block
                                 );
+                                */
 
                                 for x in start_x..=end_x {
                                     for y in start_y..=end_y {
