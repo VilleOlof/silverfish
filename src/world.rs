@@ -2,6 +2,7 @@ use fastnbt::{LongArray, Value};
 use mca::{CompressionType, PendingChunk, RegionReader, RegionWriter};
 
 use crate::{
+    config::FlushConfig,
     coordinate::Coordinate,
     error::RustEditError,
     nbt::Section,
@@ -126,7 +127,7 @@ impl World {
         self
     }
 
-    pub fn flush(&mut self) -> Result<(), RustEditError> {
+    pub fn flush(&mut self, config: FlushConfig) -> Result<(), RustEditError> {
         let instant = Instant::now();
         let mut operations: Vec<OperationData> = vec![];
         for operation in &self.operations {
@@ -288,9 +289,10 @@ impl World {
                                 }
 
                                 let (x, y, z) = (
-                                    coordinate.x() as i64 % 16,
-                                    coordinate.y() as i64 - (section.y as i64 * 16) as i64,
-                                    coordinate.z() as i64 % 16,
+                                    // broder kan inte matematik 5, lär dig regler gällande kongruens tack
+                                    coordinate.x() & 15,
+                                    coordinate.y() & 15,
+                                    coordinate.z() & 15,
                                 );
 
                                 let index = x + z * 16 + y * 16 * 16;
@@ -303,17 +305,10 @@ impl World {
                                     state.palette.push(block.clone());
                                 }
 
-                                let (from_x, from_y, from_z) = (
-                                    from.x() & 15,
-                                    from.y() & 15,
-                                    from.z() & 15,
-                                );
+                                let (from_x, from_y, from_z) =
+                                    (from.x() & 15, from.y() & 15, from.z() & 15);
 
-                                let (to_x, to_y, to_z) = (
-                                    to.x() & 15,
-                                    to.y() & 15,
-                                    to.z() & 15,
-                                );
+                                let (to_x, to_y, to_z) = (to.x() & 15, to.y() & 15, to.z() & 15);
 
                                 // im lazy
                                 let start_x = from_x.min(to_x);
@@ -394,6 +389,9 @@ impl World {
                     // blocklight is just what each block emits
                     // no clue how we should approach this since we could only store
                     // the light data for current 1.21.8 blocks and not modded ones and old stuff etc.
+                    if config.update_blocklight {
+                        //
+                    }
 
                     modified_sections.push(section.to_value());
                 }
@@ -401,6 +399,9 @@ impl World {
                 // update skylight
                 // we would need to update this *after* all sections in the chunk has been updated
                 // since we need to go through all sections to update their skylight according to block_states
+                if config.update_skylight {
+                    //
+                }
 
                 // reconstruct "sections"
                 let new_sections: Vec<Value> = match sections {

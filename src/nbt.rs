@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
 
 use fastnbt::{ByteArray, LongArray, Value, to_value};
 use serde::{Deserialize, Serialize};
@@ -38,7 +41,7 @@ impl Section {
         match sections {
             Value::List(sects) => {
                 for (idddx, s_v) in sects.iter().enumerate() {
-                    match s_v {    
+                    match s_v {
                         Value::Compound(c)
                             if c.get("Y").ok_or(RustEditError::WorldError(
                                 "No Y value in section".into(),
@@ -46,7 +49,7 @@ impl Section {
                         {
                             let section = fastnbt::from_value(s_v)?;
                             return Ok(section);
-                        },
+                        }
                         Value::Compound(_) => (),
                         _ => {
                             return Err(RustEditError::WorldError(
@@ -116,37 +119,94 @@ impl BlockStates {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Hash)]
 pub struct Block {
     #[serde(rename = "Name")]
     pub name: String,
     #[serde(rename = "Properties", default)]
-    pub properties: HashMap<String, String>,
+    pub properties: Option<BTreeMap<String, String>>,
+}
+
+impl Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.name,
+            if let Some(props) = &self.properties {
+                &format!(
+                    "[{}]",
+                    props
+                        .iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )
+            } else {
+                ""
+            }
+        )
+    }
 }
 
 impl Block {
-    pub fn new(block: impl AsRef<str>) -> Self {
+    /// Creates a new block from just an id
+    ///
+    /// Auto populates into minecraft namespace if no namespace was given
+    pub fn new<B: AsRef<str>>(block: B) -> Self {
+        let name = block.as_ref().to_string();
         Block {
-            name: block.as_ref().to_string(),
-            properties: HashMap::new(),
+            name: if name.contains(":") {
+                name
+            } else {
+                String::from("minecraft:") + &name
+            },
+            properties: None,
+        }
+    }
+
+    /// Creates a new block
+    ///
+    /// Auto populates into minecraft namespace if no namespace was given
+    ///
+    /// ## Example
+    /// ```
+    /// let conduit = Block::new_with_props("conduit", [("pickles", "4")]);
+    /// ```
+    pub fn new_with_props<B: AsRef<str>, const N: usize>(
+        block: B,
+        properties: [(&str, &str); N],
+    ) -> Self {
+        let name = block.as_ref().to_string();
+        Block {
+            name: if name.contains(":") {
+                name
+            } else {
+                String::from("minecraft:") + &name
+            },
+            properties: Some(BTreeMap::from(
+                properties.map(|(k, v)| (k.to_string(), v.to_string())),
+            )),
         }
     }
 
     pub fn to_value(self) -> Value {
         let mut map = HashMap::<String, Value>::new();
 
-        if !self.properties.is_empty() {
-            map.insert("Properties".into(), self.properties_to_value());
+        if let Some(props) = self.properties {
+            if !props.is_empty() {
+                map.insert("Properties".into(), Block::properties_to_value(props));
+            }
         }
         map.insert("Name".into(), Value::String(self.name));
 
         Value::Compound(map)
     }
 
-    pub fn properties_to_value(&self) -> Value {
+    pub fn properties_to_value(props: BTreeMap<String, String>) -> Value {
         let mut map = HashMap::<String, Value>::new();
 
-        for (key, value) in &self.properties {
+        for (key, value) in &props {
             map.insert(key.to_string(), Value::String(value.to_string()));
         }
 
