@@ -304,23 +304,15 @@ impl World {
                                 }
 
                                 let (from_x, from_y, from_z) = (
-                                    (from.x() as i64 % 16
-                                        + (16 * ((from.x().signum() - 1) / 2) * (-1)) as i64)
-                                        % 16,
-                                    from.y() as i64 - (section.y as i64 * 16) as i64,
-                                    (from.z() as i64 % 16
-                                        + (16 * ((from.z().signum() - 1) / 2) * (-1)) as i64)
-                                        % 16,
+                                    from.x() & 15,
+                                    from.y() & 15,
+                                    from.z() & 15,
                                 );
 
                                 let (to_x, to_y, to_z) = (
-                                    (to.x() as i64 % 16
-                                        + (16 * ((to.x().signum() - 1) / 2) * (-1)) as i64)
-                                        % 16,
-                                    to.y() as i64 - (section.y as i64 * 16) as i64,
-                                    (to.z() as i64 % 16
-                                        + (16 * ((to.z().signum() - 1) / 2) * (-1)) as i64)
-                                        % 16,
+                                    to.x() & 15,
+                                    to.y() & 15,
+                                    to.z() & 15,
                                 );
 
                                 // im lazy
