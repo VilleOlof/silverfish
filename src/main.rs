@@ -6,7 +6,7 @@ use rust_edit::{
     operation::Operation,
     world::World,
 };
-use std::{collections::HashMap, io::Read, ops::Deref, path::PathBuf};
+use std::{collections::HashMap, io::Read, ops::Deref, path::PathBuf, time::Instant};
 
 #[derive(Debug)]
 struct ModifyOperation {
@@ -262,5 +262,7 @@ fn main() {
             properties: HashMap::new(),
         },
     });
+    let instant = Instant::now();
     world.flush().unwrap();
+    println!("Modified world in {:?}", instant.elapsed());
 }

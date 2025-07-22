@@ -8,7 +8,12 @@ use crate::{
     operation::{Operation, OperationData, SplitUnit},
 };
 use std::{
-    collections::HashMap, fs::{self, File}, io::Read, ops::Deref, path::{Path, PathBuf}, time::{SystemTime, UNIX_EPOCH}
+    collections::HashMap,
+    fs::{self, File},
+    io::Read,
+    ops::Deref,
+    path::{Path, PathBuf},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 /// A Minecraft "World"
@@ -75,6 +80,8 @@ impl Dimension {
 }
 
 impl World {
+    const FULL_STATUS: &'static str = "minecraft:full";
+
     /// Creates a new World instance to work on
     #[cfg(not(feature = "spigot"))]
     pub fn new<P>(world_path: P) -> Self
@@ -120,6 +127,7 @@ impl World {
     }
 
     pub fn flush(&mut self) -> Result<(), RustEditError> {
+        let instant = Instant::now();
         let mut operations: Vec<OperationData> = vec![];
         for operation in &self.operations {
             match &operation.operation {
@@ -155,7 +163,10 @@ impl World {
             }
         }
 
-        for region_group in World::group_operations(operations) {
+        let groups = World::group_operations(operations);
+        println!("Took {:?} to resolve & group operations", instant.elapsed());
+        for region_group in groups {
+            let instant = Instant::now();
             // load region
             #[cfg(not(feature = "spigot"))]
             let mut region_path = region_group.dimension.path(&self.path);
@@ -163,8 +174,11 @@ impl World {
             let mut region_path = region_group.dimension.path(&self.path, &self.world_name);
 
             // OLOF ÄR MEGA DUM!!
-            region_path = region_path.join(format!("r.{}.{}.mca", region_group.region_coordinate.x(), region_group.region_coordinate.z()));
-
+            region_path = region_path.join(format!(
+                "r.{}.{}.mca",
+                region_group.region_coordinate.x(),
+                region_group.region_coordinate.z()
+            ));
 
             let mut region_buf = vec![];
             File::open(&region_path)?.read_to_end(&mut region_buf)?;
@@ -207,6 +221,14 @@ impl World {
                         ));
                     }
                 };
+                // check status
+                let chunk_status = root
+                    .get("Status")
+                    .ok_or(RustEditError::WorldError("No Status field in chunk".into()))?;
+                if chunk_status != World::FULL_STATUS {
+                    eprintln!("Tried to operate on a chunk that hasn't been generated");
+                    continue;
+                }
 
                 let sections = root
                     .get_mut("sections")
@@ -225,20 +247,7 @@ impl World {
 
                     let mut section = Section::get_from_idx(&sections, section_idx)?;
 
-                    //   _    _ ______ _____  ______
-                    //  | |  | |  ____|  __ \|  ____|
-                    //  | |__| | |__  | |__) | |__
-                    //  |  __  |  __| |  _  /|  __|
-                    //  | |  | | |____| | \ \| |____
-                    //  |_|  |_|______|_|  \_\______|
-
-                    // TODO ris HERE RIISSS, KOD HÄR
-                    // ok - ris
-                    // i havent tested any of this code after the grouping
-                    // but i think this should read the region, ... and then save it correctly :)
-
                     // deconstruct data/palette
-
                     let mut state = section.block_states;
 
                     let bit_count: u32 = state
@@ -253,10 +262,11 @@ impl World {
                     let mut offset: u32 = 0;
                     for data_block in state.data.iter() {
                         while (offset * bit_count) + bit_count <= 64 {
-                            let block = (data_block >> (offset * bit_count)) & ((1 << bit_count) - 1);
-            
+                            let block =
+                                (data_block >> (offset * bit_count)) & ((1 << bit_count) - 1);
+
                             old_indexes.push(block);
-            
+
                             offset += 1
                         }
                         offset = 0;
@@ -276,14 +286,12 @@ impl World {
                                 if !state.palette.contains(&block) {
                                     state.palette.push(block.clone());
                                 }
-                                
 
                                 let (x, y, z) = (
                                     coordinate.x() as i64 % 16,
                                     coordinate.y() as i64 - (section.y as i64 * 16) as i64,
                                     coordinate.z() as i64 % 16,
                                 );
-
 
                                 let index = x + z * 16 + y * 16 * 16;
 
@@ -296,17 +304,25 @@ impl World {
                                 }
 
                                 let (from_x, from_y, from_z) = (
-                                    from.x() as i64 % 16,
+                                    (from.x() as i64 % 16
+                                        + (16 * ((from.x().signum() - 1) / 2) * (-1)) as i64)
+                                        % 16,
                                     from.y() as i64 - (section.y as i64 * 16) as i64,
-                                    from.z() as i64 % 16,
+                                    (from.z() as i64 % 16
+                                        + (16 * ((from.z().signum() - 1) / 2) * (-1)) as i64)
+                                        % 16,
                                 );
 
                                 let (to_x, to_y, to_z) = (
-                                    to.x() as i64 % 16,
+                                    (to.x() as i64 % 16
+                                        + (16 * ((to.x().signum() - 1) / 2) * (-1)) as i64)
+                                        % 16,
                                     to.y() as i64 - (section.y as i64 * 16) as i64,
-                                    to.z() as i64 % 16,
+                                    (to.z() as i64 % 16
+                                        + (16 * ((to.z().signum() - 1) / 2) * (-1)) as i64)
+                                        % 16,
                                 );
-                                
+
                                 // im lazy
                                 let start_x = from_x.min(to_x);
                                 let start_y = from_y.min(to_y);
@@ -316,22 +332,17 @@ impl World {
                                 let end_y = from_y.max(to_y);
                                 let end_z = from_z.max(to_z);
 
-                                /*
-                                println!("section = {}", section.y);
-                                println!(
-                                    "start = ({}, {}, {}), end = ({}, {}, {}), block = {:?}",
-                                    start_x, start_y, start_z, end_x, end_y, end_z, block
-                                );
-                                */
-
                                 for x in start_x..=end_x {
                                     for y in start_y..=end_y {
                                         for z in start_z..=end_z {
                                             let index = x + z * 16 + y * 16 * 16;
 
-                                            old_indexes[index as usize] =
-                                                state.palette.iter().position(|b| b == &block)
-                                                    .unwrap() as i64;
+                                            old_indexes[index as usize] = state
+                                                .palette
+                                                .iter()
+                                                .position(|b| b == &block)
+                                                .unwrap()
+                                                as i64;
                                         }
                                     }
                                 }
@@ -339,6 +350,7 @@ impl World {
                         }
                     }
 
+                    // construct data/palette
                     let mut unused_indexes = Vec::new();
                     for (idx, _p) in state.palette.iter().enumerate() {
                         if old_indexes.contains(&(idx as i64)) {
@@ -356,8 +368,6 @@ impl World {
                             }
                         }
                     }
-
-                    // construct data/palette
 
                     let mut new_blockdata = vec![];
                     let bit_count: u32 = state
@@ -387,8 +397,18 @@ impl World {
                     state.data = LongArray::new(new_blockdata);
 
                     section.block_states = state;
+
+                    // update blocklight
+                    // blocklight is just what each block emits
+                    // no clue how we should approach this since we could only store
+                    // the light data for current 1.21.8 blocks and not modded ones and old stuff etc.
+
                     modified_sections.push(section.to_value());
                 }
+
+                // update skylight
+                // we would need to update this *after* all sections in the chunk has been updated
+                // since we need to go through all sections to update their skylight according to block_states
 
                 // reconstruct "sections"
                 let new_sections: Vec<Value> = match sections {
@@ -427,8 +447,7 @@ impl World {
             }
 
             // for every chunk not in region_group.chunk_operations
-            // copy it over to a new RegionWriter (just need to clone data, no deompress/compress for this data)
-
+            // copy it over to a new RegionWriter (just need to clone the compressed data)
             for (i, chunk) in region.iter().enumerate() {
                 let chunk = chunk?;
                 let chunk = match chunk {
@@ -464,10 +483,16 @@ impl World {
             //writer.write(&mut File::create(&region_path)?)?;
 
             fs::create_dir_all("output/region").unwrap();
-            
+
             let output = PathBuf::from("output").join(region_path);
 
             writer.write(&mut File::create(&output)?)?;
+            println!(
+                "Took {:?} to process r.{}.{}.mca",
+                instant.elapsed(),
+                region_group.region_coordinate.x(),
+                region_group.region_coordinate.z()
+            );
         }
 
         Ok(())

@@ -28,11 +28,19 @@ pub enum Operation {
     // probably gonna be one of the most useful operations
     // callback is a nice to mutate list/map of all blocks and their data/coordinate
     // that the callback can modify and then "map" that then gets written to disk
+    // should also provide block entity mapping from chunks higher fields?
+    // specify from/to or specify a specific chunk? a specific section?
     // Map {
     //     from: Coordinate,
     //     to: Coordinate,
     //     callback: fn(data: BlockData) -> BlockData,
     // },
+    // TODO gives the user the entire chunk as nbt so they can do whatever
+    // MapChunk {
+    //     chunk_x: isize,
+    //     chunk_z: isize,
+    //     callback: fn(chunk: HashMap<String, Value>) -> HashMap<String, Value>,
+    // }
 }
 
 #[derive(Debug, Clone)]
