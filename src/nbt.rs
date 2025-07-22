@@ -37,8 +37,8 @@ impl Section {
     pub fn get_from_idx(sections: &Value, idx: isize) -> Result<Self, RustEditError> {
         match sections {
             Value::List(sects) => {
-                for s_v in sects {
-                    match s_v {
+                for (idddx, s_v) in sects.iter().enumerate() {
+                    match s_v {    
                         Value::Compound(c)
                             if c.get("Y").ok_or(RustEditError::WorldError(
                                 "No Y value in section".into(),
@@ -46,10 +46,11 @@ impl Section {
                         {
                             let section = fastnbt::from_value(s_v)?;
                             return Ok(section);
-                        }
+                        },
+                        Value::Compound(_) => (),
                         _ => {
                             return Err(RustEditError::WorldError(
-                                "section isn't a compound".into(),
+                                format!("section {} isn't a compound", idddx).into(),
                             ));
                         }
                     }

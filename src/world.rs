@@ -1,4 +1,4 @@
-use fastnbt::Value;
+use fastnbt::{LongArray, Value};
 use mca::{CompressionType, PendingChunk, RegionReader, RegionWriter};
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{self, File},
     io::Read,
     ops::Deref,
     path::{Path, PathBuf},
@@ -163,9 +163,13 @@ impl World {
         for region_group in World::group_operations(operations) {
             // load region
             #[cfg(not(feature = "spigot"))]
-            let region_path = region_group.dimension.path(&self.path);
+            let mut region_path = region_group.dimension.path(&self.path);
             #[cfg(feature = "spigot")]
-            let region_path = region_group.dimension.path(&self.path, &self.world_name);
+            let mut region_path = region_group.dimension.path(&self.path, &self.world_name);
+
+            // OLOF ÄR MEGA DUM!!
+            region_path = region_path.join(format!("r.{}.{}.mca", region_group.region_coordinate.x(), region_group.region_coordinate.z()));
+
 
             let mut region_buf = vec![];
             File::open(&region_path)?.read_to_end(&mut region_buf)?;
@@ -234,19 +238,154 @@ impl World {
                     //  |_|  |_|______|_|  \_\______|
 
                     // TODO ris HERE RIISSS, KOD HÄR
+                    // ok - ris
                     // i havent tested any of this code after the grouping
                     // but i think this should read the region, ... and then save it correctly :)
 
                     // deconstruct data/palette
 
+                    let mut state = section.block_states;
+
+                    let bit_count: u32 = state
+                        .palette
+                        .len()
+                        .next_power_of_two()
+                        .trailing_zeros()
+                        .max(4);
+
+                    let mut old_indexes: Vec<i64> = Vec::new();
+
+                    let mut offset: u32 = 0;
+                    for data_block in state.data.iter() {
+                        while (offset * bit_count) + bit_count <= 64 {
+                            let block = (data_block >> (offset * bit_count)) & ((1 << bit_count) - 1);
+            
+                            old_indexes.push(block);
+            
+                            offset += 1
+                        }
+                        offset = 0;
+                    }
+                    old_indexes.truncate(4096);
+
                     // modify, run operations
                     // these operations are 100% to be within this exact same section
                     for operation in operations {
-                        //
+                        match operation {
+                            Operation::Setblock { coordinate, block } => {
+                                if !state.palette.contains(&block) {
+                                    state.palette.push(block.clone());
+                                }
+                                
+
+                                let (x, y, z) = (
+                                    coordinate.x() as i64 % 16,
+                                    coordinate.y() as i64 - (section.y as i64 * 16) as i64,
+                                    coordinate.z() as i64 % 16,
+                                );
+
+
+                                let index = x + z * 16 + y * 16 * 16;
+
+                                old_indexes[index as usize] =
+                                    state.palette.iter().position(|b| b == &block).unwrap() as i64;
+                            }
+                            Operation::Fill { from, to, block } => {
+                                if !state.palette.contains(&block) {
+                                    state.palette.push(block.clone());
+                                }
+
+                                let (from_x, from_y, from_z) = (
+                                    from.x() as i64 % 16,
+                                    from.y() as i64 - (section.y as i64 * 16) as i64,
+                                    from.z() as i64 % 16,
+                                );
+
+                                let (to_x, to_y, to_z) = (
+                                    to.x() as i64 % 16,
+                                    to.y() as i64 - (section.y as i64 * 16) as i64,
+                                    to.z() as i64 % 16,
+                                );
+                                
+                                // im lazy
+                                let start_x = from_x.min(to_x);
+                                let start_y = from_y.min(to_y);
+                                let start_z = from_z.min(to_z);
+
+                                let end_x = from_x.max(to_x);
+                                let end_y = from_y.max(to_y);
+                                let end_z = from_z.max(to_z);
+
+
+                                println!("section = {}", section.y);
+                                println!(
+                                    "start = ({}, {}, {}), end = ({}, {}, {}), block = {:?}",
+                                    start_x, start_y, start_z, end_x, end_y, end_z, block
+                                );
+
+                                for x in start_x..=end_x {
+                                    for y in start_y..=end_y {
+                                        for z in start_z..=end_z {
+                                            let index = x + z * 16 + y * 16 * 16;
+
+                                            old_indexes[index as usize] =
+                                                state.palette.iter().position(|b| b == &block)
+                                                    .unwrap() as i64;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let mut unused_indexes = Vec::new();
+                    for (idx, _p) in state.palette.iter().enumerate() {
+                        if old_indexes.contains(&(idx as i64)) {
+                            continue;
+                        }
+
+                        unused_indexes.push(idx as i64);
+                    }
+
+                    for index in unused_indexes.iter().rev() {
+                        state.palette.remove(*index as usize);
+                        for block in old_indexes.iter_mut() {
+                            if *block > *index {
+                                *block -= 1;
+                            }
+                        }
                     }
 
                     // construct data/palette
 
+                    let mut new_blockdata = vec![];
+                    let bit_count: u32 = state
+                        .palette
+                        .len()
+                        .next_power_of_two()
+                        .trailing_zeros()
+                        .max(4);
+
+                    let mut offset = 0;
+                    let mut currrent_long: i64 = 0;
+                    for block in old_indexes.iter() {
+                        currrent_long |= block << (offset * bit_count);
+                        offset += 1;
+
+                        if (offset * bit_count) + bit_count > 64 {
+                            new_blockdata.push(currrent_long);
+                            currrent_long = 0;
+                            offset = 0;
+                        }
+                    }
+
+                    if offset > 0 {
+                        new_blockdata.push(currrent_long);
+                    }
+
+                    state.data = LongArray::new(new_blockdata);
+
+                    section.block_states = state;
                     modified_sections.push(section.to_value());
                 }
 
@@ -319,7 +458,15 @@ impl World {
             }
 
             // save region & move onto the next one
-            writer.write(&mut File::create(&region_path)?)?;
+            // NO DONT DO THAT, NOT FOR NOW
+            // TODO: replace file when updating
+            //writer.write(&mut File::create(&region_path)?)?;
+
+            fs::create_dir_all("output/region").unwrap();
+            
+            let output = PathBuf::from("output").join(region_path);
+
+            writer.write(&mut File::create(&output)?)?;
         }
 
         Ok(())
