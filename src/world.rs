@@ -1,11 +1,11 @@
-use fastnbt::{LongArray, Value};
+use fastnbt::{ByteArray, LongArray, Value};
 use mca::{CompressionType, PendingChunk, RegionReader, RegionWriter};
 
 use crate::{
     config::FlushConfig,
     coordinate::Coordinate,
     error::RustEditError,
-    nbt::Section,
+    nbt::{Block, Section},
     operation::{Operation, OperationData, SplitUnit},
 };
 use std::{
@@ -251,6 +251,11 @@ impl World {
                     // deconstruct data/palette
                     let mut state = section.block_states;
 
+                    let mut block_light = match &section.block_light {
+                        Some(bl) => bl.clone(),
+                        None => ByteArray::new(vec![0; 2048]),
+                    };
+
                     let bit_count: u32 = state
                         .palette
                         .len()
@@ -299,6 +304,7 @@ impl World {
 
                                 old_indexes[index as usize] =
                                     state.palette.iter().position(|b| b == &block).unwrap() as i64;
+                                // modify block light here
                             }
                             Operation::Fill { from, to, block } => {
                                 if !state.palette.contains(&block) {
@@ -330,6 +336,7 @@ impl World {
                                                 .position(|b| b == &block)
                                                 .unwrap()
                                                 as i64;
+                                            // modify block light here
                                         }
                                     }
                                 }
@@ -385,12 +392,15 @@ impl World {
 
                     section.block_states = state;
 
-                    // update blocklight
-                    // blocklight is just what each block emits
-                    // no clue how we should approach this since we could only store
-                    // the light data for current 1.21.8 blocks and not modded ones and old stuff etc.
+                    // update block_light if configured to
+                    // we calculated it anyway but uhhhhh
                     if config.update_blocklight {
-                        //
+                        // if its empty or all 0, no need to write it
+                        if block_light.iter().all(|l| *l == 0) || block_light.is_empty() {
+                            section.block_light = None;
+                        } else {
+                            section.block_light = Some(block_light);
+                        }
                     }
 
                     modified_sections.push(section.to_value());

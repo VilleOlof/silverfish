@@ -10,10 +10,12 @@ use crate::error::RustEditError;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Section {
-    #[serde(rename = "SkyLight", default = "byte_array_default")]
-    pub sky_light: ByteArray,
-    #[serde(rename = "BlockLight", default = "byte_array_default")]
-    pub block_light: ByteArray,
+    // #[serde(rename = "SkyLight", default = "byte_array_default")]
+    #[serde(rename = "SkyLight", default)]
+    pub sky_light: Option<ByteArray>,
+    // #[serde(rename = "BlockLight", default = "byte_array_default")]
+    #[serde(rename = "BlockLight", default)]
+    pub block_light: Option<ByteArray>,
     #[serde(rename = "Y")]
     pub y: i8,
     pub biomes: Biomes,
@@ -24,12 +26,17 @@ impl Section {
     pub fn to_value(self) -> Value {
         let mut map = HashMap::<String, Value>::new();
 
-        if !self.sky_light.is_empty() {
-            map.insert("SkyLight".into(), Value::ByteArray(self.sky_light));
+        if let Some(sky_light) = self.sky_light {
+            if !sky_light.is_empty() {
+                map.insert("SkyLight".into(), Value::ByteArray(sky_light));
+            }
         }
-        if !self.block_light.is_empty() {
-            map.insert("BlockLight".into(), Value::ByteArray(self.block_light));
+        if let Some(block_light) = self.block_light {
+            if !block_light.is_empty() {
+                map.insert("BlockLight".into(), Value::ByteArray(block_light));
+            }
         }
+
         map.insert("Y".into(), Value::Byte(self.y));
         map.insert("biomes".into(), self.biomes.to_value());
         map.insert("block_states".into(), self.block_states.to_value());
@@ -212,10 +219,6 @@ impl Block {
 
         Value::Compound(map)
     }
-}
-
-fn byte_array_default() -> ByteArray {
-    ByteArray::new(vec![])
 }
 
 fn long_array_default() -> LongArray {
