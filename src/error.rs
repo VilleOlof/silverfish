@@ -22,4 +22,6 @@ pub enum RustEditError {
     NbtError(#[from] fastnbt::error::Error),
     #[error("io failed: {0}")]
     IoError(#[from] io::Error),
+    #[error("{0}")]
+    Other(String),
 }

@@ -15,7 +15,6 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{BufWriter, Read},
-    ops::Deref,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -333,8 +332,10 @@ impl World {
                     root.insert("isLightOn".into(), Value::Byte(0));
                 }
 
+                // we can remove and get an owned sections value
+                // since we insert it later on based on this data.
                 let sections = root
-                    .get_mut("sections")
+                    .remove("sections")
                     .ok_or(RustEditError::WorldError("no sections in chunk".into()))?;
 
                 let mut modified_sections = vec![];
@@ -453,17 +454,14 @@ impl World {
                             match sect {
                                 // we skip any we have modified since they're already in the vec
                                 Value::Compound(c)
-                                    if is_modified_section(
-                                        &modified_section_indexes,
-                                        c.deref(),
-                                    )? =>
+                                    if is_modified_section(&modified_section_indexes, &c)? =>
                                 {
                                     continue;
                                 }
                                 _ => (),
                             }
 
-                            new_sections.push(sect.deref().clone());
+                            new_sections.push(sect);
                         }
 
                         new_sections
