@@ -211,11 +211,10 @@ impl World {
         #[cfg(feature = "spigot")]
         let mut region_path = region_group.dimension.path(&self.path, &self.world_name);
 
-        
         region_path = World::get_mca_file(region_path, &region_group.region_coordinate);
 
         let mut region_buf = vec![];
-        let region =  if !config.in_memory {
+        let region = if !config.in_memory {
             File::open(&region_path)?.read_to_end(&mut region_buf)?;
             RegionReader::new(region_buf.as_ref())?
         } else {
@@ -246,9 +245,7 @@ impl World {
 
             let chunk = region.get_chunk(local_chunk_x, local_chunk_z)?;
             let chunk_data = match chunk {
-                Some(c) => {
-                    c.decompress()?
-                },
+                Some(c) => c.decompress()?,
                 None => {
                     // TODO no clue what we do in this, just return, exit everything? skip? warn user? how?
                     // eprintln!("Tried to operate on a chunk that hasn't been generated");
@@ -277,17 +274,16 @@ impl World {
                     }
 
                     let chunk = fastnbt::nbt!({
-                         "Status": "minecraft:full",
-                         "DataVersion": 2860, //1.18
-                         "sections": sections,
-                         "xPos": chunk_group.chunk_coordinate.x(),
-                         "zPos": chunk_group.chunk_coordinate.z()
+                        "Status": "minecraft:full",
+                        "DataVersion": World::MIN_LIGHT_DATA_VERSION, //1.18
+                        "sections": sections,
+                        "xPos": chunk_group.chunk_coordinate.x(),
+                        "zPos": chunk_group.chunk_coordinate.z()
                     });
 
                     fastnbt::to_bytes(&chunk)?
                 }
             };
-            
 
             let mut chunk_nbt: Value = fastnbt::from_bytes(&chunk_data)?;
             let root = match &mut chunk_nbt {
@@ -533,18 +529,19 @@ impl World {
                     None => continue,
                 };
                 let (local_x, local_z) = (i % 32, i / 32);
-    
+
                 // if we have already written it to the writer
                 if modified_chunk_locals.contains(&(local_x, local_z)) {
                     continue;
                 }
-    
+
                 let timestamp = {
                     let start = SystemTime::now();
-                    let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
+                    let since_the_epoch =
+                        start.duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
                     since_the_epoch.to_be()
                 };
-    
+
                 // just move over the data to the writer with no modification if we didnt touch it
                 writer.push_pending_chunk(PendingChunk::new_compressed(
                     chunk.raw_data.to_vec(),
@@ -554,7 +551,7 @@ impl World {
                 )?);
             }
         }
-        
+
         let output_file = PathBuf::from("output").join(region_path);
 
         fs::create_dir_all(&output_file.parent().expect("no parent")).unwrap();

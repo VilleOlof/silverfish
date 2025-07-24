@@ -268,7 +268,7 @@ impl Operation {
         // first top section
         ops.push(Operation::Fill {
             from: Coordinate::new(top.x(), top.y(), top.z()),
-            to: Coordinate::new(bottom.x(), top.y() - (top.y() % 16), bottom.z()),
+            to: Coordinate::new(bottom.x(), top.y() - (top.y() & 15), bottom.z()),
             block: block.clone()
         });
 
@@ -288,7 +288,7 @@ impl Operation {
         }
         // last bottom section
         ops.push(Operation::Fill {
-            from: Coordinate::new(top.x(), bottom.y() + (15 - (bottom.y() % 16)), top.z()),
+            from: Coordinate::new(top.x(), bottom.y() + (15 - (bottom.y() & 15)), top.z()),
             to: Coordinate::new(bottom.x(), bottom.y(), bottom.z()),
             block: block.clone()
         });
