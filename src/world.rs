@@ -552,6 +552,7 @@ fn handle_operation(operation: &Operation, state: &mut BlockStates, old_indexes:
             if !state.palette.contains(&block) {
                 state.palette.push(block.clone());
             }
+            let palette_index = state.palette.iter().position(|b| b == block).unwrap() as i64;
 
             let (x, y, z) = (
                 // broder kan inte matematik 5, lär dig regler gällande kongruens tack
@@ -562,13 +563,13 @@ fn handle_operation(operation: &Operation, state: &mut BlockStates, old_indexes:
 
             let index = x + z * 16 + y * 16 * 16;
 
-            old_indexes[index as usize] =
-                state.palette.iter().position(|b| b == block).unwrap() as i64;
+            old_indexes[index as usize] = palette_index;
         }
         Operation::Fill { from, to, block } => {
             if !state.palette.contains(&block) {
                 state.palette.push(block.clone());
             }
+            let palette_index = state.palette.iter().position(|b| b == block).unwrap() as i64;
 
             let (from_x, from_y, from_z) = (from.x() & 15, from.y() & 15, from.z() & 15);
 
@@ -588,8 +589,7 @@ fn handle_operation(operation: &Operation, state: &mut BlockStates, old_indexes:
                     for z in start_z..=end_z {
                         let index = x + z * 16 + y * 16 * 16;
 
-                        old_indexes[index as usize] =
-                            state.palette.iter().position(|b| b == block).unwrap() as i64;
+                        old_indexes[index as usize] = palette_index;
                     }
                 }
             }
