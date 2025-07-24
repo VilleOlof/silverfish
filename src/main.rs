@@ -31,14 +31,10 @@ fn main() {
         to: Coordinate::new(to[0], to[1], to[2]),
         block: Block::new(block),
     });
-    world.push_op(Operation::Setblock {
-        coordinate: Coordinate::new(from[0] + 1, from[1] + 1, from[2] + 1),
-        block: Block::new("glowstone"),
-    });
     let instant = Instant::now();
     world
         .flush(FlushConfig {
-            update_blocklight: true,
+            update_lighting: true,
             ..Default::default()
         })
         .unwrap();

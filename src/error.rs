@@ -11,6 +11,9 @@ pub enum RustEditError {
     MismatchedCoordinateType(Coordinate),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+    // TODO split WorldError into more types, like
+    // look at all the errors in World::flush and stuff and split them
+    // into more unique ones than just "string"
     #[error("{0}")]
     WorldError(String),
     #[error("mca failed: {0}")]
