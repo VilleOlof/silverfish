@@ -14,3 +14,9 @@ rayon = "1.10"
 
 [features]
 spigot = []
+
+[profile.speed]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
