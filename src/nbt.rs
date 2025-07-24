@@ -141,7 +141,7 @@ impl Debug for Block {
             "{}{}",
             self.name,
             if let Some(props) = &self.properties {
-                &format!(
+                format!(
                     "[{}]",
                     props
                         .iter()
@@ -150,7 +150,7 @@ impl Debug for Block {
                         .join(", ")
                 )
             } else {
-                ""
+                "".to_owned()
             }
         )
     }

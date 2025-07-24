@@ -12,7 +12,7 @@ use crate::{
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::Read,
+    io::{BufWriter, Read},
     ops::Deref,
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -114,6 +114,13 @@ impl World {
         }
     }
 
+    pub fn memory() -> Self {
+        Self {
+            path: PathBuf::new(),
+            operations: Vec::new(),
+        }
+    }
+
     /// Pushes an [`Operation`] to the current [`World`] to be "flushed" later  
     ///
     /// Creates an [`OperationData`] that operate in [`Dimension::default`]
@@ -204,11 +211,20 @@ impl World {
         #[cfg(feature = "spigot")]
         let mut region_path = region_group.dimension.path(&self.path, &self.world_name);
 
+        
         region_path = World::get_mca_file(region_path, &region_group.region_coordinate);
 
         let mut region_buf = vec![];
-        File::open(&region_path)?.read_to_end(&mut region_buf)?;
-        let region = RegionReader::new(&region_buf)?;
+        let region =  if !config.in_memory {
+            File::open(&region_path)?.read_to_end(&mut region_buf)?;
+            RegionReader::new(region_buf.as_ref())?
+        } else {
+            let local = RegionWriter::new();
+            let mut local_writer = BufWriter::new(Vec::new());
+            local.write(&mut local_writer)?;
+            region_buf = local_writer.into_inner().unwrap();
+            RegionReader::new(&region_buf.as_slice())?
+        };
 
         let mut writer = RegionWriter::new();
         let mut modified_chunk_locals: Vec<(usize, usize)> = vec![];
@@ -229,15 +245,51 @@ impl World {
             modified_chunk_locals.push((local_chunk_x, local_chunk_z));
 
             let chunk = region.get_chunk(local_chunk_x, local_chunk_z)?;
-            let chunk = match chunk {
-                Some(c) => c,
+            let chunk_data = match chunk {
+                Some(c) => {
+                    c.decompress()?
+                },
                 None => {
                     // TODO no clue what we do in this, just return, exit everything? skip? warn user? how?
-                    eprintln!("Tried to operate on a chunk that hasn't been generated");
-                    continue;
+                    // eprintln!("Tried to operate on a chunk that hasn't been generated");
+                    //
+                    // im also unsure about this but for now lets create a fake chunk
+                    // this adds the possibility of creating chunks without having an input world - ris
+
+                    let mut sections: Vec<Value> = vec![];
+
+                    for y in -4..=19 {
+                        sections.push(fastnbt::nbt!({
+                            "Y": y as i8,
+                            "biomes": {
+                                "palette": [
+                                    "minecraft:plains"
+                                ]
+                            },
+                            "block_states": {
+                                "palette": [
+                                    {
+                                        "Name": "minecraft:air"
+                                    }
+                                ]
+                            }
+                        }));
+                    }
+
+
+                    let chunk = fastnbt::nbt!({
+                         "Status": "minecraft:full",
+                         "DataVersion": 2860, //1.18
+                         "sections": sections,
+                         "xPos": local_chunk_x,
+                         "zPos": local_chunk_z
+                    });
+
+                    fastnbt::to_bytes(&chunk)?
                 }
             };
-            let chunk_data = chunk.decompress()?;
+            
+
             let mut chunk_nbt: Value = fastnbt::from_bytes(&chunk_data)?;
             let root = match &mut chunk_nbt {
                 Value::Compound(r) => r,
@@ -247,7 +299,7 @@ impl World {
                     ));
                 }
             };
-            // check status
+            // check- status
             let chunk_status = root
                 .get("Status")
                 .ok_or(RustEditError::WorldError("No Status field in chunk".into()))?;
@@ -474,39 +526,41 @@ impl World {
 
         // for every chunk not in region_group.chunk_operations
         // copy it over to a new RegionWriter (just need to clone the compressed data)
-        for (i, chunk) in region.iter().enumerate() {
-            let chunk = chunk?;
-            let chunk = match chunk {
-                Some(c) => c,
-                None => continue,
-            };
-            let (local_x, local_z) = (i % 32, i / 32);
-
-            // if we have already written it to the writer
-            if modified_chunk_locals.contains(&(local_x, local_z)) {
-                continue;
+        if !config.in_memory {
+            for (i, chunk) in region.iter().enumerate() {
+                let chunk = chunk?;
+                let chunk = match chunk {
+                    Some(c) => c,
+                    None => continue,
+                };
+                let (local_x, local_z) = (i % 32, i / 32);
+    
+                // if we have already written it to the writer
+                if modified_chunk_locals.contains(&(local_x, local_z)) {
+                    continue;
+                }
+    
+                let timestamp = {
+                    let start = SystemTime::now();
+                    let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
+                    since_the_epoch.to_be()
+                };
+    
+                // just move over the data to the writer with no modification if we didnt touch it
+                writer.push_pending_chunk(PendingChunk::new_compressed(
+                    chunk.raw_data.to_vec(),
+                    chunk.get_compression_type(),
+                    timestamp,
+                    (local_x as u8, local_z as u8),
+                )?);
             }
-
-            let timestamp = {
-                let start = SystemTime::now();
-                let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-                since_the_epoch.to_be()
-            };
-
-            // just move over the data to the writer with no modification if we didnt touch it
-            writer.push_pending_chunk(PendingChunk::new_compressed(
-                chunk.raw_data.to_vec(),
-                chunk.get_compression_type(),
-                timestamp,
-                (local_x as u8, local_z as u8),
-            )?);
         }
+        
+        let output_file = PathBuf::from("output").join(region_path);
 
-        fs::create_dir_all("output/region").unwrap();
+        fs::create_dir_all(&output_file.parent().expect("no parent")).unwrap();
 
-        let output = PathBuf::from("output").join(region_path);
-
-        writer.write(&mut File::create(&output)?)?;
+        writer.write(&mut File::create(&output_file)?)?;
         println!(
             "Took {:?} to process r.{}.{}.mca",
             instant.elapsed(),

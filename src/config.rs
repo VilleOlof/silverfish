@@ -13,6 +13,9 @@ pub struct FlushConfig {
     ///
     /// Unmodified chunks will retain it's [`CompressionType`]
     pub chunk_compression: CompressionType,
+
+    /// If the creating a new world, which does not have an input directory
+    pub in_memory: bool
 }
 
 impl Default for FlushConfig {
@@ -20,6 +23,7 @@ impl Default for FlushConfig {
         Self {
             update_lighting: true,
             chunk_compression: CompressionType::Zlib,
+            in_memory: false
         }
     }
 }

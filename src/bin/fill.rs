@@ -4,8 +4,9 @@ use rust_edit::{
 use std::time::Instant;
 
 fn main() {
+
     // temporary sloppy argument thingy to test
-    // example: cargo r -- "." 10,10,10 30,30,30 bedrock
+    // example: cargo r --bin fill -- "." 10,10,10 30,30,30 bedrock
     let args: Vec<String> = std::env::args().collect();
     let path = args.get(1).expect("no world path given");
     let from: Vec<isize> = args
