@@ -6,8 +6,10 @@ use crate::{
     config::FlushConfig,
     coordinate::{Coordinate, CoordinateType},
     error::RustEditError,
-    nbt::Section,
+    grouping::{RegionGroup, group_operations},
+    nbt::{BlockStates, Section},
     operation::{Operation, OperationData, SplitUnit},
+    split::split_fill_into,
 };
 use std::{
     collections::HashMap,
@@ -156,13 +158,13 @@ impl World {
                 } => {
                     // resolve fill that spans multiple regions/chunks/sections into sections
                     let mut section: Vec<OperationData> =
-                        Operation::split_fill_into(&operation.operation, SplitUnit::Region)?
+                        split_fill_into(&operation.operation, SplitUnit::Region)?
                             .iter()
-                            .map(|r| Operation::split_fill_into(&r, SplitUnit::Chunk))
+                            .map(|r| split_fill_into(&r, SplitUnit::Chunk))
                             .collect::<Result<Vec<_>, _>>()?
                             .into_iter()
                             .flatten()
-                            .map(|c| Operation::split_fill_into(&c, SplitUnit::Section))
+                            .map(|c| split_fill_into(&c, SplitUnit::Section))
                             .collect::<Result<Vec<_>, _>>()?
                             .into_iter()
                             .flatten()
@@ -176,7 +178,7 @@ impl World {
             }
         }
 
-        let groups = World::group_operations(operations);
+        let groups = group_operations(operations);
         println!("Took {:?} to resolve & group operations", instant.elapsed());
 
         groups
@@ -277,6 +279,7 @@ impl World {
                         "Status": "minecraft:full",
                         "DataVersion": World::MIN_LIGHT_DATA_VERSION, //1.18
                         "sections": sections,
+                        "isLightOn": 0 as i8,
                         "xPos": chunk_group.chunk_coordinate.x(),
                         "zPos": chunk_group.chunk_coordinate.z()
                     });
@@ -383,56 +386,7 @@ impl World {
                 // modify, run operations
                 // these operations are 100% to be within this exact same section
                 for operation in operations {
-                    match operation {
-                        Operation::Setblock { coordinate, block } => {
-                            if !state.palette.contains(&block) {
-                                state.palette.push(block.clone());
-                            }
-
-                            let (x, y, z) = (
-                                // broder kan inte matematik 5, lär dig regler gällande kongruens tack
-                                coordinate.x() & 15,
-                                coordinate.y() & 15,
-                                coordinate.z() & 15,
-                            );
-
-                            let index = x + z * 16 + y * 16 * 16;
-
-                            old_indexes[index as usize] =
-                                state.palette.iter().position(|b| b == &block).unwrap() as i64;
-                        }
-                        Operation::Fill { from, to, block } => {
-                            if !state.palette.contains(&block) {
-                                state.palette.push(block.clone());
-                            }
-
-                            let (from_x, from_y, from_z) =
-                                (from.x() & 15, from.y() & 15, from.z() & 15);
-
-                            let (to_x, to_y, to_z) = (to.x() & 15, to.y() & 15, to.z() & 15);
-
-                            // im lazy
-                            let start_x = from_x.min(to_x);
-                            let start_y = from_y.min(to_y);
-                            let start_z = from_z.min(to_z);
-
-                            let end_x = from_x.max(to_x);
-                            let end_y = from_y.max(to_y);
-                            let end_z = from_z.max(to_z);
-
-                            for x in start_x..=end_x {
-                                for y in start_y..=end_y {
-                                    for z in start_z..=end_z {
-                                        let index = x + z * 16 + y * 16 * 16;
-
-                                        old_indexes[index as usize] =
-                                            state.palette.iter().position(|b| b == &block).unwrap()
-                                                as i64;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    handle_operation(&operation, &mut state, &mut old_indexes);
                 }
 
                 // construct data/palette
@@ -522,34 +476,7 @@ impl World {
         // for every chunk not in region_group.chunk_operations
         // copy it over to a new RegionWriter (just need to clone the compressed data)
         if !config.in_memory {
-            for (i, chunk) in region.iter().enumerate() {
-                let chunk = chunk?;
-                let chunk = match chunk {
-                    Some(c) => c,
-                    None => continue,
-                };
-                let (local_x, local_z) = (i % 32, i / 32);
-
-                // if we have already written it to the writer
-                if modified_chunk_locals.contains(&(local_x, local_z)) {
-                    continue;
-                }
-
-                let timestamp = {
-                    let start = SystemTime::now();
-                    let since_the_epoch =
-                        start.duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
-                    since_the_epoch.to_be()
-                };
-
-                // just move over the data to the writer with no modification if we didnt touch it
-                writer.push_pending_chunk(PendingChunk::new_compressed(
-                    chunk.raw_data.to_vec(),
-                    chunk.get_compression_type(),
-                    timestamp,
-                    (local_x as u8, local_z as u8),
-                )?);
-            }
+            copy_unmodified_chunks(region, &mut writer, modified_chunk_locals)?;
         }
 
         let output_file = PathBuf::from("output").join(region_path);
@@ -566,85 +493,6 @@ impl World {
 
         Ok(())
     }
-
-    /// Groups operations   
-    ///
-    /// - first by their **region [`Coordinate`]** and **[`Dimension`]**
-    /// - then by **chunk [`Coordinate`]**
-    /// - and lastly by **section index**
-    fn group_operations(operations: Vec<OperationData>) -> Vec<RegionGroup> {
-        let mut map: HashMap<
-            Dimension,
-            HashMap<Coordinate, HashMap<Coordinate, HashMap<isize, Vec<Operation>>>>,
-        > = HashMap::new();
-
-        for data in operations {
-            let region_coords = data.operation.get_init_coords().as_region();
-            let chunk_coords = data.operation.get_init_coords().as_chunk();
-            let section_idx =
-                (data.operation.get_init_coords().y() as f64 / 16f64).floor() as isize;
-
-            map.entry(data.dimension)
-                .or_default()
-                .entry(region_coords)
-                .or_default()
-                .entry(chunk_coords)
-                .or_default()
-                .entry(section_idx)
-                .or_default()
-                .push(data.operation);
-        }
-
-        let mut region_groups = vec![];
-        for (dimension, region_map) in map {
-            for (region_coordinate, chunk_map) in region_map {
-                let mut chunk_groups = vec![];
-
-                for (chunk_coordinate, section_map) in chunk_map {
-                    let mut section_groups = vec![];
-
-                    for (section_idx, operations) in section_map {
-                        section_groups.push(SectionGroup {
-                            section_idx,
-                            operations,
-                        });
-                    }
-
-                    chunk_groups.push(ChunkGroup {
-                        chunk_coordinate,
-                        section_operations: section_groups,
-                    });
-                }
-
-                region_groups.push(RegionGroup {
-                    dimension: dimension.clone(),
-                    region_coordinate,
-                    chunk_operations: chunk_groups,
-                });
-            }
-        }
-
-        region_groups
-    }
-}
-
-/// A group region with it's coordinate and dimension data
-/// along side it's grouped operations
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RegionGroup {
-    dimension: Dimension,
-    region_coordinate: Coordinate,
-    chunk_operations: Vec<ChunkGroup>,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ChunkGroup {
-    chunk_coordinate: Coordinate,
-    section_operations: Vec<SectionGroup>,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SectionGroup {
-    section_idx: isize,
-    operations: Vec<Operation>,
 }
 
 fn is_modified_section(
@@ -660,4 +508,91 @@ fn is_modified_section(
     };
 
     Ok(mod_indexes.contains(&(curr_y as isize)))
+}
+
+fn copy_unmodified_chunks(
+    region: RegionReader,
+    writer: &mut RegionWriter,
+    modified_chunks: Vec<(usize, usize)>,
+) -> Result<(), RustEditError> {
+    for (i, chunk) in region.iter().enumerate() {
+        let chunk = chunk?;
+        let chunk = match chunk {
+            Some(c) => c,
+            None => continue,
+        };
+        let (local_x, local_z) = (i % 32, i / 32);
+
+        // if we have already written it to the writer
+        if modified_chunks.contains(&(local_x, local_z)) {
+            continue;
+        }
+
+        let timestamp = {
+            let start = SystemTime::now();
+            let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
+            since_the_epoch.to_be()
+        };
+
+        // just move over the data to the writer with no modification if we didnt touch it
+        writer.push_pending_chunk(PendingChunk::new_compressed(
+            chunk.raw_data.to_vec(),
+            chunk.get_compression_type(),
+            timestamp,
+            (local_x as u8, local_z as u8),
+        )?);
+    }
+
+    Ok(())
+}
+
+fn handle_operation(operation: &Operation, state: &mut BlockStates, old_indexes: &mut Vec<i64>) {
+    match operation {
+        Operation::Setblock { coordinate, block } => {
+            if !state.palette.contains(&block) {
+                state.palette.push(block.clone());
+            }
+
+            let (x, y, z) = (
+                // broder kan inte matematik 5, lär dig regler gällande kongruens tack
+                coordinate.x() & 15,
+                coordinate.y() & 15,
+                coordinate.z() & 15,
+            );
+
+            let index = x + z * 16 + y * 16 * 16;
+
+            old_indexes[index as usize] =
+                state.palette.iter().position(|b| b == block).unwrap() as i64;
+        }
+        Operation::Fill { from, to, block } => {
+            if !state.palette.contains(&block) {
+                state.palette.push(block.clone());
+            }
+
+            let (from_x, from_y, from_z) = (from.x() & 15, from.y() & 15, from.z() & 15);
+
+            let (to_x, to_y, to_z) = (to.x() & 15, to.y() & 15, to.z() & 15);
+
+            // im lazy
+            let start_x = from_x.min(to_x);
+            let start_y = from_y.min(to_y);
+            let start_z = from_z.min(to_z);
+
+            let end_x = from_x.max(to_x);
+            let end_y = from_y.max(to_y);
+            let end_z = from_z.max(to_z);
+
+            for x in start_x..=end_x {
+                for y in start_y..=end_y {
+                    for z in start_z..=end_z {
+                        let index = x + z * 16 + y * 16 * 16;
+
+                        old_indexes[index as usize] =
+                            state.palette.iter().position(|b| b == block).unwrap() as i64;
+                    }
+                }
+            }
+        }
+    }
 }
