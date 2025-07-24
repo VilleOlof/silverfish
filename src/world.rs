@@ -276,13 +276,12 @@ impl World {
                         }));
                     }
 
-
                     let chunk = fastnbt::nbt!({
                          "Status": "minecraft:full",
                          "DataVersion": 2860, //1.18
                          "sections": sections,
-                         "xPos": local_chunk_x,
-                         "zPos": local_chunk_z
+                         "xPos": chunk_group.chunk_coordinate.x(),
+                         "zPos": chunk_group.chunk_coordinate.z()
                     });
 
                     fastnbt::to_bytes(&chunk)?
