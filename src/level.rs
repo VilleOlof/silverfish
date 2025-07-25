@@ -14,11 +14,11 @@ impl World {
     ///
     /// See the [minecraft.wiki](https://minecraft.wiki/w/Java_Edition_level_format#level.dat_format) for keys, values & the format.  
     pub fn get_level_dat(&self) -> Result<NbtCompound, RustEditError> {
-        let file = File::open(self.get_level_dat_path())?;
-        let mut decoder = GzDecoder::new(file);
-        let mut bytes = vec![];
-        decoder.read_to_end(&mut bytes)?;
-        let nbt = simdnbt::owned::read(&mut Cursor::new(&bytes))?;
+        let bytes = self.get_raw_level_dat()?;
+        let nbt = match simdnbt::owned::read(&mut Cursor::new(&bytes))? {
+            Nbt::Some(nbt) => nbt,
+            Nbt::None => return Err(RustEditError::NbtError("No nbt data in level.dat".into())),
+        };
 
         let data = nbt
             .compound("Data")
@@ -28,6 +28,17 @@ impl World {
             .clone();
 
         Ok(data)
+    }
+
+    /// Returns the raw bytes (`Vec<u8>`) for the `level.dat` file  
+    ///
+    /// *Bytes after it's been decompressed*  
+    pub fn get_raw_level_dat(&self) -> Result<Vec<u8>, RustEditError> {
+        let file = File::open(self.get_level_dat_path())?;
+        let mut decoder = GzDecoder::new(file);
+        let mut bytes = vec![];
+        decoder.read_to_end(&mut bytes)?;
+        Ok(bytes)
     }
 
     /// Sets, and thus overwrites the level.dat file within a [`World`]
