@@ -18,8 +18,12 @@ pub enum RustEditError {
     WorldError(String),
     #[error("mca failed: {0}")]
     McaError(#[from] McaError),
+    // #[error("nbt failed: {0}")]
+    // NbtError(#[from] fastnbt::error::Error),
     #[error("nbt failed: {0}")]
-    NbtError(#[from] fastnbt::error::Error),
+    NbtError(String),
+    #[error("simdnbt failed: {0}")]
+    SimdnbtError(#[from] simdnbt::Error),
     #[error("io failed: {0}")]
     IoError(#[from] io::Error),
     #[error("{0}")]

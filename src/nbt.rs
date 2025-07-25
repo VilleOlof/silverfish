@@ -1,137 +1,247 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-};
+use std::{collections::BTreeMap, fmt::Debug};
 
-use fastnbt::{ByteArray, LongArray, Value, to_value};
-use serde::{Deserialize, Serialize};
+use simdnbt::{
+    Mutf8Str,
+    owned::{NbtCompound, NbtList, NbtTag},
+};
 
 use crate::error::RustEditError;
 
-#[derive(Debug, Deserialize, Clone)]
+pub trait NbtConversion {
+    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError>
+    where
+        Self: Sized;
+    fn to_compound(self) -> Result<NbtCompound, RustEditError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
-    // #[serde(rename = "SkyLight", default = "byte_array_default")]
-    #[serde(rename = "SkyLight", default)]
-    pub sky_light: Option<ByteArray>,
-    // #[serde(rename = "BlockLight", default = "byte_array_default")]
-    #[serde(rename = "BlockLight", default)]
-    pub block_light: Option<ByteArray>,
-    #[serde(rename = "Y")]
+    pub sky_light: Option<Vec<u8>>,
+    pub block_light: Option<Vec<u8>>,
     pub y: i8,
     pub biomes: Biomes,
     pub block_states: BlockStates,
 }
 
-impl Section {
-    pub fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Biomes {
+    pub data: Option<Vec<i64>>,
+    pub palette: Vec<String>,
+}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockStates {
+    pub data: Option<Vec<i64>>,
+    pub palette: Vec<Block>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct Block {
+    pub name: String,
+    pub properties: Option<BTreeMap<String, String>>,
+}
+
+impl NbtConversion for Section {
+    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
+        let sky_light = tag.byte_array("SkyLight").map(|b| b.to_vec());
+        let block_light = tag.byte_array("BlockLight").map(|b| b.to_vec());
+        let y = tag
+            .byte("Y")
+            .ok_or(RustEditError::NbtError("Missing 'Y' in section".into()))?;
+        let biomes = tag.compound("biomes").ok_or(RustEditError::NbtError(
+            "Missing 'biomes' in section".into(),
+        ))?;
+        let biomes = Biomes::from_compound(&biomes)?;
+
+        let block_states = tag.compound("block_states").ok_or(RustEditError::NbtError(
+            "Missing 'block_states' in section".into(),
+        ))?;
+        let block_states = BlockStates::from_compound(&block_states)?;
+
+        Ok(Section {
+            sky_light,
+            block_light,
+            y,
+            biomes,
+            block_states,
+        })
+    }
+
+    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
+        let mut tag = NbtCompound::new();
         if let Some(sky_light) = self.sky_light {
             if !sky_light.is_empty() {
-                map.insert("SkyLight".into(), Value::ByteArray(sky_light));
+                tag.insert("SkyLight", NbtTag::ByteArray(sky_light));
             }
         }
         if let Some(block_light) = self.block_light {
             if !block_light.is_empty() {
-                map.insert("BlockLight".into(), Value::ByteArray(block_light));
+                tag.insert("BlockLight", NbtTag::ByteArray(block_light));
+            }
+        }
+        tag.insert("Y", NbtTag::Byte(self.y));
+
+        tag.insert("biomes", self.biomes.to_compound()?);
+        tag.insert("block_states", self.block_states.to_compound()?);
+
+        Ok(tag)
+    }
+}
+
+impl NbtConversion for Biomes {
+    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
+        let data = tag.long_array("data").map(|d| d.to_vec());
+        let palette = tag.list("palette").ok_or(RustEditError::NbtError(
+            "Missing 'palette' in biomes".into(),
+        ))?;
+        // TODO simdnbt doesnt expose Mutf8String, only Mutf8Str which is a reference one
+        // Mutf8String also handles NBT specific string things so we would want that but uhh it doesnt expose it.
+        let palette: Vec<String> = palette
+            .strings()
+            .map(|s| s.iter().map(|m| m.to_str().to_string()).collect())
+            .ok_or(RustEditError::NbtError("Failed to get palette vec".into()))?;
+
+        Ok(Biomes { data, palette })
+    }
+
+    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
+        let mut tag = NbtCompound::new();
+        if let Some(data) = self.data {
+            // if palette len is 1, skip writing data
+            if self.palette.len() != 1 {
+                tag.insert("data", NbtTag::LongArray(data));
+            }
+        }
+        tag.insert(
+            "palette",
+            NbtTag::List(NbtList::String(
+                self.palette
+                    .iter()
+                    .map(|s| Mutf8Str::from_str(&s).into_owned())
+                    .collect(),
+            )),
+        );
+
+        Ok(tag)
+    }
+}
+
+impl NbtConversion for BlockStates {
+    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
+        let data = tag.long_array("data").map(|d| d.to_vec());
+
+        let palette = tag.list("palette").ok_or(RustEditError::NbtError(
+            "Missing 'palette' in biomes".into(),
+        ))?;
+        let palette: Vec<Block> = palette
+            .compounds()
+            .ok_or(RustEditError::NbtError(
+                "Invalid palette structure in block states".into(),
+            ))?
+            .iter()
+            .map(|p| Block::from_compound(p))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(BlockStates { data, palette })
+    }
+
+    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
+        let mut tag = NbtCompound::new();
+
+        if let Some(data) = self.data {
+            // if palette len is 1, skip writing data
+            if self.palette.len() != 1 {
+                tag.insert("data", NbtTag::LongArray(data));
+            }
+        }
+        let palette_nbt: Vec<NbtCompound> = self
+            .palette
+            .into_iter()
+            .map(|b| b.to_compound())
+            .collect::<Result<Vec<_>, _>>()?;
+        tag.insert("palette", NbtList::Compound(palette_nbt));
+
+        Ok(tag)
+    }
+}
+
+impl NbtConversion for Block {
+    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
+        let name = tag
+            .string("Name")
+            .ok_or(RustEditError::NbtError(
+                "Missing 'name' in section palette".into(),
+            ))?
+            .to_str()
+            .to_string();
+
+        let properties = match tag.compound("Properties") {
+            // skip calculating if empty
+            Some(props) if props.is_empty() => None,
+            Some(props) => {
+                let mut new_properties = BTreeMap::new();
+
+                for (k, v) in props.iter() {
+                    new_properties.insert(
+                        k.to_str().to_string(),
+                        v.string()
+                            .ok_or(RustEditError::NbtError(
+                                "Property value is not a string in section block palette".into(),
+                            ))?
+                            .to_str()
+                            .to_string(),
+                    );
+                }
+                Some(new_properties)
+            }
+            None => None,
+        };
+
+        Ok(Block { name, properties })
+    }
+
+    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
+        let mut tag = NbtCompound::new();
+        tag.insert(
+            "Name",
+            NbtTag::String(Mutf8Str::from_str(&self.name).into_owned()),
+        );
+        if let Some(props) = self.properties {
+            // skip writing if properties is empty
+            if !props.is_empty() {
+                let mut props_tag = NbtCompound::new();
+                for (k, v) in props {
+                    props_tag.insert(k, NbtTag::String(Mutf8Str::from_str(&v).into_owned()));
+                }
+                tag.insert("Properties", props_tag);
             }
         }
 
-        map.insert("Y".into(), Value::Byte(self.y));
-        map.insert("biomes".into(), self.biomes.to_value());
-        map.insert("block_states".into(), self.block_states.to_value());
-
-        Value::Compound(map)
+        Ok(tag)
     }
+}
 
-    pub fn get_from_idx(sections: &Value, idx: isize) -> Result<Self, RustEditError> {
-        match sections {
-            Value::List(sects) => {
-                for (curr_sect_idx, s_v) in sects.iter().enumerate() {
-                    match s_v {
-                        Value::Compound(c)
-                            if c.get("Y").ok_or(RustEditError::WorldError(
-                                "No Y value in section".into(),
-                            ))? == idx =>
-                        {
-                            let section = fastnbt::from_value(s_v)?;
-                            return Ok(section);
-                        }
-                        Value::Compound(_) => (),
-                        _ => {
-                            return Err(RustEditError::WorldError(
-                                format!("section {} isn't a compound", curr_sect_idx).into(),
-                            ));
-                        }
-                    }
-                }
+impl Section {
+    pub fn get_from_idx(sections: &NbtList, idx: isize) -> Result<Self, RustEditError> {
+        let compound_list = sections.compounds().ok_or(RustEditError::NbtError(
+            "Sections is the wrong list data type".into(),
+        ))?;
+
+        for c in compound_list {
+            let y = c
+                .byte("Y")
+                .ok_or(RustEditError::WorldError("Missing 'Y' in section".into()))?
+                as isize;
+            if y == idx {
+                let section = Section::from_compound(c)?;
+                return Ok(section);
             }
-            _ => return Err(RustEditError::WorldError("sections isn't a list".into())),
         }
 
         Err(RustEditError::WorldError(
             "no section found with a valid index".into(),
         ))
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct Biomes {
-    #[serde(default = "long_array_default")]
-    pub data: LongArray,
-    #[serde(default)]
-    pub palette: Vec<String>,
-}
-
-impl Biomes {
-    pub fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if !self.data.is_empty() {
-            map.insert("data".into(), Value::LongArray(self.data));
-        }
-        map.insert("palette".into(), to_value(self.palette).unwrap());
-
-        Value::Compound(map)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct BlockStates {
-    #[serde(default = "long_array_default")]
-    pub data: LongArray,
-    #[serde(default)]
-    pub palette: Vec<Block>,
-}
-
-impl BlockStates {
-    pub fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if !self.data.is_empty() {
-            map.insert("data".into(), Value::LongArray(self.data));
-        }
-        map.insert(
-            "palette".into(),
-            to_value(
-                self.palette
-                    .iter()
-                    .map(|p| p.clone().to_value())
-                    .collect::<Vec<Value>>(),
-            )
-            .unwrap(),
-        );
-
-        Value::Compound(map)
-    }
-}
-
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Hash)]
-pub struct Block {
-    #[serde(rename = "Name")]
-    pub name: String,
-    #[serde(rename = "Properties", default)]
-    pub properties: Option<BTreeMap<String, String>>,
 }
 
 impl Debug for Block {
@@ -196,31 +306,4 @@ impl Block {
             )),
         }
     }
-
-    pub fn to_value(self) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        if let Some(props) = self.properties {
-            if !props.is_empty() {
-                map.insert("Properties".into(), Block::properties_to_value(props));
-            }
-        }
-        map.insert("Name".into(), Value::String(self.name));
-
-        Value::Compound(map)
-    }
-
-    pub fn properties_to_value(props: BTreeMap<String, String>) -> Value {
-        let mut map = HashMap::<String, Value>::new();
-
-        for (key, value) in &props {
-            map.insert(key.to_string(), Value::String(value.to_string()));
-        }
-
-        Value::Compound(map)
-    }
-}
-
-fn long_array_default() -> LongArray {
-    LongArray::new(vec![])
 }

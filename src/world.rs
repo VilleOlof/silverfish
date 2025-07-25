@@ -1,20 +1,22 @@
-use fastnbt::{LongArray, Value};
 use mca::{PendingChunk, RegionReader, RegionWriter};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use simdnbt::{
+    Mutf8Str,
+    owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag},
+};
 
 use crate::{
     config::FlushConfig,
     coordinate::{Coordinate, CoordinateType},
     error::RustEditError,
     grouping::{RegionGroup, group_operations},
-    nbt::{BlockStates, Section},
+    nbt::{BlockStates, NbtConversion, Section},
     operation::{Operation, OperationData, SplitUnit},
     split::split_fill_into,
 };
 use std::{
-    collections::HashMap,
     fs::{self, File},
-    io::{BufWriter, Read},
+    io::{BufWriter, Cursor, Read},
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -250,95 +252,101 @@ impl World {
                 let chunk = region.get_chunk(local_chunk_x, local_chunk_z)?;
                 let chunk_data = match chunk {
                     Some(c) => c.decompress()?,
-                    None => {
-                        // TODO no clue what we do in this, just return, exit everything? skip? warn user? how?
-                        // eprintln!("Tried to operate on a chunk that hasn't been generated");
-                        //
-                        // im also unsure about this but for now lets create a fake chunk
-                        // this adds the possibility of creating chunks without having an input world - ris
-
-                        let mut sections: Vec<Value> = vec![];
+                    None if config.in_memory => {
+                        // create new chunk
+                        let mut sections: Vec<NbtCompound> = vec![];
 
                         for y in -4..=19 {
-                            sections.push(fastnbt::nbt!({
-                                "Y": y as i8,
-                                "biomes": {
-                                    "palette": [
-                                        "minecraft:plains"
-                                    ]
-                                },
-                                "block_states": {
-                                    "palette": [
-                                        {
-                                            "Name": "minecraft:air"
-                                        }
-                                    ]
-                                }
-                            }));
+                            let biomes = NbtCompound::from_values(vec![(
+                                "palette".into(),
+                                NbtTag::List(NbtList::String(vec!["minecraft:plains".into()])),
+                            )]);
+                            let block_states = NbtCompound::from_values(vec![(
+                                "palette".into(),
+                                NbtTag::List(NbtList::Compound(vec![NbtCompound::from_values(
+                                    vec![("Name".into(), NbtTag::String("minecraft:air".into()))],
+                                )])),
+                            )]);
+
+                            sections.push(NbtCompound::from_values(vec![
+                                ("Y".into(), NbtTag::Byte(y)),
+                                ("biomes".into(), NbtTag::Compound(biomes)),
+                                ("block_states".into(), NbtTag::Compound(block_states)),
+                            ]));
                         }
 
-                        let chunk = fastnbt::nbt!({
-                            "Status": "minecraft:full",
-                            "DataVersion": World::MIN_LIGHT_DATA_VERSION, //1.18
-                            "sections": sections,
-                            "isLightOn": 0 as i8,
-                            "xPos": chunk_group.chunk_coordinate.x(),
-                            "zPos": chunk_group.chunk_coordinate.z()
-                        });
+                        let chunk = NbtCompound::from_values(vec![
+                            (
+                                "Status".into(),
+                                NbtTag::String(World::REQUIRED_STATUS.into()),
+                            ),
+                            (
+                                "DataVersion".into(),
+                                NbtTag::Int(World::MIN_LIGHT_DATA_VERSION),
+                            ),
+                            ("sections".into(), NbtTag::List(NbtList::Compound(sections))),
+                            ("isLightOn".into(), NbtTag::Byte(0)),
+                            (
+                                "xPos".into(),
+                                NbtTag::Int(chunk_group.chunk_coordinate.x() as i32),
+                            ),
+                            (
+                                "zPos".into(),
+                                NbtTag::Int(chunk_group.chunk_coordinate.z() as i32),
+                            ),
+                        ]);
+                        // wrap it in a root tag
+                        let chunk = Nbt::Some(BaseNbt::new("", chunk));
 
-                        fastnbt::to_bytes(&chunk)?
+                        let mut buf = vec![];
+                        chunk.write(&mut buf);
+                        buf
+                    }
+                    None => {
+                        // TODO no clue what we do in this, just return, exit everything? skip? warn user? how?
+                        eprintln!("Tried to operate on a chunk that hasn't been generated");
+                        return Ok(());
                     }
                 };
 
-                let mut chunk_nbt: Value = fastnbt::from_bytes(&chunk_data)?;
-                let root = match &mut chunk_nbt {
-                    Value::Compound(r) => r,
-                    _ => {
-                        return Err(RustEditError::WorldError(
-                            "No root compound for chunk".into(),
-                        ));
-                    }
-                };
+                let chunk_nbt = simdnbt::owned::read(&mut Cursor::new(&chunk_data))?;
+                let mut root = chunk_nbt.unwrap().as_compound();
+
                 // check- status
                 let chunk_status = root
-                    .get("Status")
-                    .ok_or(RustEditError::WorldError("No Status field in chunk".into()))?;
+                    .string("Status")
+                    .ok_or(RustEditError::WorldError("No Status field in chunk".into()))?
+                    .to_str();
                 if chunk_status != World::REQUIRED_STATUS {
                     eprintln!("Tried to operate on a chunk that hasn't been generated");
                     // continue;
                     return Ok(());
                 }
 
-                let data_version = root.get("DataVersion").ok_or(RustEditError::WorldError(
+                let data_version = root.int("DataVersion").ok_or(RustEditError::WorldError(
                     "No DataVersion field in chunk".into(),
                 ))?;
-                match data_version {
-                    Value::Int(data_version) => {
-                        if config.update_lighting && *data_version < World::MIN_LIGHT_DATA_VERSION {
-                            return Err(RustEditError::WorldError(format!(
-                                "Tried to update lighting on a version prior to DataVersion {}",
-                                World::MIN_LIGHT_DATA_VERSION
-                            )));
-                        }
-                    }
-                    _ => {
-                        return Err(RustEditError::WorldError(
-                            "Invalid data type for DataVersion".into(),
-                        ));
-                    }
+                if config.update_lighting && data_version < World::MIN_LIGHT_DATA_VERSION {
+                    return Err(RustEditError::WorldError(format!(
+                        "Tried to update lighting on a version prior to DataVersion {}",
+                        World::MIN_LIGHT_DATA_VERSION
+                    )));
                 }
 
                 if config.update_lighting {
-                    root.insert("isLightOn".into(), Value::Byte(0));
+                    root.insert(
+                        Mutf8Str::from_str("isLightOn").into_owned(),
+                        NbtTag::Byte(0),
+                    );
                 }
 
                 // we can remove and get an owned sections value
                 // since we insert it later on based on this data.
                 let sections = root
-                    .remove("sections")
+                    .list("sections")
                     .ok_or(RustEditError::WorldError("no sections in chunk".into()))?;
 
-                let mut modified_sections = vec![];
+                let mut modified_sections: Vec<NbtCompound> = vec![];
                 let modified_section_indexes: Vec<isize> = chunk_group
                     .section_operations
                     .iter()
@@ -353,6 +361,10 @@ impl World {
 
                     // deconstruct data/palette
                     let mut state = section.block_states;
+                    let data = match &state.data {
+                        Some(data) => data,
+                        None => &vec![0; 4096],
+                    };
 
                     if config.update_lighting {
                         // we use "onLightOn" and let Minecraft itself re-calculate lighting when first loaded
@@ -371,7 +383,7 @@ impl World {
                     let mut old_indexes: Vec<i64> = Vec::new();
 
                     let mut offset: u32 = 0;
-                    for data_block in state.data.iter() {
+                    for data_block in data.iter() {
                         while (offset * bit_count) + bit_count <= 64 {
                             let block =
                                 (data_block >> (offset * bit_count)) & ((1 << bit_count) - 1);
@@ -439,38 +451,30 @@ impl World {
                         new_blockdata.push(currrent_long);
                     }
 
-                    state.data = LongArray::new(new_blockdata);
+                    state.data = Some(new_blockdata);
 
                     section.block_states = state;
 
-                    modified_sections.push(section.to_value());
+                    modified_sections.push(section.to_compound()?);
                 }
 
                 // reconstruct "sections"
-                let new_sections: Vec<Value> = match sections {
-                    Value::List(sections) => {
-                        let mut new_sections: Vec<Value> = modified_sections;
-                        for sect in sections {
-                            match sect {
-                                // we skip any we have modified since they're already in the vec
-                                Value::Compound(c)
-                                    if is_modified_section(&modified_section_indexes, &c)? =>
-                                {
-                                    continue;
-                                }
-                                _ => (),
-                            }
-
-                            new_sections.push(sect);
-                        }
-
-                        new_sections
+                let mut new_sections = modified_sections;
+                for sect in sections.compounds().unwrap() {
+                    if is_modified_section(&modified_section_indexes, &sect)? {
+                        continue;
                     }
-                    _ => return Err(RustEditError::WorldError("section isn't a list".into())),
-                };
 
-                root.insert("sections".into(), Value::List(new_sections));
-                let raw_chunk = fastnbt::to_bytes(&chunk_nbt)?;
+                    new_sections.push(sect.clone());
+                }
+
+                root.insert(
+                    Mutf8Str::from_str("sections").into_owned(),
+                    NbtTag::List(NbtList::Compound(new_sections)),
+                );
+                let mut raw_chunk = vec![];
+                let base = Nbt::Some(BaseNbt::new("", root));
+                base.write(&mut raw_chunk);
 
                 writer.lock().unwrap().push_chunk_with_compression(
                     &raw_chunk,
@@ -493,30 +497,22 @@ impl World {
         let output_file = PathBuf::from("output").join(region_path);
 
         fs::create_dir_all(&output_file.parent().expect("no parent")).unwrap();
-
         writer.write(&mut File::create(&output_file)?)?;
         println!(
             "Took {:?} to process r.{}.{}.mca",
             instant.elapsed(),
             region_group.region_coordinate.x(),
-            region_group.region_coordinate.z()
+            region_group.region_coordinate.z(),
         );
 
         Ok(())
     }
 }
 
-fn is_modified_section(
-    mod_indexes: &Vec<isize>,
-    v: &HashMap<String, Value>,
-) -> Result<bool, RustEditError> {
-    let curr_y: i8 = match v
-        .get("Y")
-        .ok_or(RustEditError::WorldError("No Y in section".into()))?
-    {
-        Value::Byte(y) => *y,
-        _ => return Err(RustEditError::WorldError("Y isn't a byte".into())),
-    };
+fn is_modified_section(mod_indexes: &Vec<isize>, v: &NbtCompound) -> Result<bool, RustEditError> {
+    let curr_y: i8 = v
+        .byte("Y")
+        .ok_or(RustEditError::WorldError("No Y in section".into()))?;
 
     Ok(mod_indexes.contains(&(curr_y as isize)))
 }

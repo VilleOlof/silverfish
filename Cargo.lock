@@ -15,12 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
-name = "cesu8"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
-
-[[package]]
 name = "cfg-if"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -65,18 +59,6 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
-
-[[package]]
-name = "fastnbt"
-version = "2.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d4a73a95dc65551ccd98e1ecd1adb5d1ba5361146963b31f481ca42fc0520a3"
-dependencies = [
- "byteorder",
- "cesu8",
- "serde",
- "serde_bytes",
-]
 
 [[package]]
 name = "flate2"
@@ -166,42 +148,67 @@ dependencies = [
 name = "rust-edit"
 version = "0.1.0"
 dependencies = [
- "fastnbt",
  "flate2",
  "mca",
  "rayon",
- "serde",
+ "simdnbt",
  "thiserror 2.0.12",
 ]
 
 [[package]]
-name = "serde"
-version = "1.0.219"
+name = "rustc_version"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "serde_derive",
+ "semver",
 ]
 
 [[package]]
-name = "serde_bytes"
-version = "0.11.17"
+name = "semver"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8437fd221bde2d4ca316d61b90e337e9e702b3820b87d63caa9ba6c02bd06d96"
+checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
+
+[[package]]
+name = "simd_cesu8"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c14f02c32cc4ef5068b0e15bee4513942f59165add7778a518b4d507b3b97ab"
 dependencies = [
- "serde",
+ "rustc_version",
+ "simdutf8",
 ]
 
 [[package]]
-name = "serde_derive"
-version = "1.0.219"
+name = "simdnbt"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+checksum = "960b88bb7ea0984fbba94e53f1a2181ba6654e68a0eb53e45843e0eed402f10e"
+dependencies = [
+ "byteorder",
+ "flate2",
+ "simd_cesu8",
+ "simdnbt-derive",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "simdnbt-derive"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd1fe91ba0e4ee5cd6e565153b363fe06b19357ce9af07cc54371c450275d26e"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "static_assertions"
