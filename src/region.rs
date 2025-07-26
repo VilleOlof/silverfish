@@ -334,29 +334,29 @@ impl Region {
                 }
 
                 // construct data/palette
-                let mut palatte_count: Vec<i32> = vec![0; palette.len()];
+                let mut palette_count: Vec<i32> = vec![0; palette.len()];
                 for index in old_indexes.iter_mut() {
-                    palatte_count[*index as usize] += 1;
+                    palette_count[*index as usize] += 1;
                 }
 
-                let mut palatte_offsets: Vec<i64> = vec![0; palette.len()];
+                let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
 
                 let mut len = palette.len();
                 let mut i: i32 = len as i32 - 1;
                 while i >= 0 {
-                    if palatte_count[i as usize] == 0 {
+                    if palette_count[i as usize] == 0 {
                         palette.remove(i as usize);
                         len -= 1;
 
                         for j in i..(len as i32) {
-                            palatte_offsets[j as usize] += 1;
+                            palette_offsets[j as usize] += 1;
                         }
                     }
                     i -= 1;
                 }
 
                 for block in 0..old_indexes.len() {
-                    old_indexes[block] -= palatte_offsets[old_indexes[block] as usize];
+                    old_indexes[block] -= palette_offsets[old_indexes[block] as usize];
                 }
 
                 // remove any marked block entities
