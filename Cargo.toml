@@ -19,10 +19,3 @@ inherits = "release"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-
-[dev-dependencies]
-criterion = "0.3"
-
-[[bench]]
-name = "region"
-harness = false
