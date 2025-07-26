@@ -15,7 +15,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct Region {
     pub chunks: HashMap<(u8, u8), NbtCompound>,
-    pending_blocks: Vec<BlockWithCoordinate>,
+    pending_blocks: HashMap<(u32, i32, u32), Block>,
     pub config: Config,
 }
 
@@ -48,7 +48,7 @@ impl Region {
     pub fn empty() -> Self {
         Self {
             chunks: HashMap::new(),
-            pending_blocks: vec![],
+            pending_blocks: HashMap::new(),
             config: Config {
                 create_chunk_if_missing: true,
                 ..Default::default()
@@ -75,7 +75,7 @@ impl Region {
     pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>) -> Self {
         Self {
             chunks,
-            pending_blocks: vec![],
+            pending_blocks: HashMap::new(),
             config: Config::default(),
         }
     }
@@ -113,6 +113,8 @@ impl Region {
 
     /// Set a block at the specified coordinates *(local to within the region)*.  
     ///
+    /// Returns true if there was previously a block at this coordinate in the buffer.  
+    ///
     /// **Note:** This doesn't actually set the block but writes it to an internal buffer.  
     ///
     /// To actually write the changes to the `chunks`, call [`Region::write_blocks`]
@@ -124,9 +126,8 @@ impl Region {
     /// region.write_blocks();
     /// ```
     #[inline(always)]
-    pub fn set_block(&mut self, x: u32, y: i32, z: u32, block: Block) {
-        self.pending_blocks
-            .push(BlockWithCoordinate::new((x, y, z), block));
+    pub fn set_block(&mut self, x: u32, y: i32, z: u32, block: Block) -> bool {
+        self.pending_blocks.insert((x, y, z), block).is_some()
     }
 
     /// Returns the block at the specified coordinates *(local to within the region)*.  
@@ -177,6 +178,7 @@ impl Region {
             offset = 0;
         }
 
+        println!("{palette:?}");
         let palette_index = indexes[index as usize] as usize;
         let block = palette.get(palette_index).unwrap();
         return Block::from_compound(block).unwrap();
@@ -300,27 +302,27 @@ impl Region {
                 };
 
                 let mut cached_palette_indexes: HashMap<&Block, i64> = HashMap::new();
-                for block in pending_blocks {
-                    let is_in_palette = palette.iter().any(|c| &block.block == c);
+                for (block_coords, block) in pending_blocks {
+                    let is_in_palette = palette.iter().any(|c| block == c);
 
                     if !is_in_palette {
-                        let block_nbt = block.block.clone().to_compound().unwrap();
+                        let block_nbt = block.clone().to_compound().unwrap();
                         palette.push(block_nbt);
                     }
-                    let palette_index = match cached_palette_indexes.get(&block.block) {
+                    let palette_index = match cached_palette_indexes.get(block) {
                         Some(idx) => *idx,
                         None => {
                             let palette_index =
-                                palette.iter().position(|c| &block.block == c).unwrap() as i64;
-                            cached_palette_indexes.insert(&block.block, palette_index);
+                                palette.iter().position(|c| block == c).unwrap() as i64;
+                            cached_palette_indexes.insert(block, palette_index);
                             palette_index
                         }
                     };
 
                     let (x, y, z) = (
-                        block.coordinate.0 & 15,
-                        block.coordinate.1 & 15,
-                        block.coordinate.2 & 15,
+                        block_coords.0 & 15,
+                        block_coords.1 & 15,
+                        block_coords.2 & 15,
                     );
                     let index = x + z * 16 + y as u32 * 16 * 16;
 
@@ -427,48 +429,27 @@ impl Region {
     }
 }
 
-/// A block with some coordinates associated with it
-#[derive(Debug, Clone)]
-struct BlockWithCoordinate {
-    // if we now only handle 1 region at an instance per basis
-    // this coordinate should point to the xyz local to the region 0>511, -64>304, 0>511
-    // since we also dont know which region this is so we dont know if its out of bounds or not
-    // and oh, x & z can only be positive while y can be negative
-    pub coordinate: (u32, i32, u32),
-    pub block: Block,
-}
-
-impl BlockWithCoordinate {
-    pub fn new(coords: (u32, i32, u32), block: Block) -> Self {
-        assert!(coords.1 < 512 && coords.2 < 512);
-        Self {
-            coordinate: coords,
-            block,
-        }
-    }
-}
-
 struct ChunkGroup {
     pub coordinate: (u8, u8),
-    pub sections: HashMap<i8, Vec<BlockWithCoordinate>>,
+    pub sections: HashMap<i8, HashMap<(u32, i32, u32), Block>>,
 }
 
 /// Groups a list of blocks into their own sections and chunks within a region  
-fn group_blocks_into_chunks(blocks: Vec<BlockWithCoordinate>) -> Vec<ChunkGroup> {
-    let mut map: HashMap<(u8, u8), HashMap<i8, Vec<BlockWithCoordinate>>> = HashMap::new();
+fn group_blocks_into_chunks(blocks: HashMap<(u32, i32, u32), Block>) -> Vec<ChunkGroup> {
+    let mut map: HashMap<(u8, u8), HashMap<i8, HashMap<(u32, i32, u32), Block>>> = HashMap::new();
 
-    for block in blocks {
+    for ((b_x, b_y, b_z), block) in blocks {
         let (chunk_x, chunk_z) = (
-            (block.coordinate.0 as f64 / 16f64).floor() as u8,
-            (block.coordinate.2 as f64 / 16f64).floor() as u8,
+            (b_x as f64 / 16f64).floor() as u8,
+            (b_z as f64 / 16f64).floor() as u8,
         );
-        let section_y = (block.coordinate.1 as f64 / 16f64).floor() as i8;
+        let section_y = (b_y as f64 / 16f64).floor() as i8;
 
         map.entry((chunk_x, chunk_z))
             .or_default()
             .entry(section_y)
             .or_default()
-            .push(block);
+            .insert((b_x, b_y, b_z), block);
     }
 
     let mut chunk_groups = vec![];
