@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["ReeZey", "VilleOlof"]
 
 [dependencies]
-simdnbt = "0.7.1"
+simdnbt = { version = "0.7.1", git = "https://github.com/azalea-rs/simdnbt", rev = "4787a8f5326e7f4a20263873310f0893a59e33ba" }
 mca = "1.1.0"
 thiserror = "2"
 flate2 = "1.1.2"
@@ -19,3 +19,10 @@ inherits = "release"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "region"
+harness = false

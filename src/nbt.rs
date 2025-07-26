@@ -35,7 +35,7 @@ pub struct BlockStates {
     pub palette: Vec<Block>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Block {
     pub name: String,
     pub properties: Option<BTreeMap<String, String>>,
