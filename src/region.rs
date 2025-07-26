@@ -335,20 +335,20 @@ impl Region {
 
                 // construct data/palette
                 let mut palette_count: Vec<i32> = vec![0; palette.len()];
-                for index in old_indexes.iter_mut() {
+                for index in &old_indexes {
                     palette_count[*index as usize] += 1;
                 }
 
                 let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
 
                 let mut len = palette.len();
-                let mut i: i32 = len as i32 - 1;
-                while i >= 0 {
-                    if palette_count[i as usize] == 0 {
-                        palette.remove(i as usize);
+                let mut i = len - 1;
+                while i != 0 {
+                    if palette_count[i] == 0 {
+                        palette.remove(i);
                         len -= 1;
 
-                        for j in i..(len as i32) {
+                        for j in i..len {
                             palette_offsets[j as usize] += 1;
                         }
                     }
