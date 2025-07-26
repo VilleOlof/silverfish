@@ -300,6 +300,13 @@ impl Region {
                     _ => panic!("Invalid nbt list"),
                 };
 
+                // this *should* check for bad files
+                for idx in old_indexes.iter_mut() {
+                    if *idx < 0 || *idx >= palette.len() as i64 {
+                        panic!("Invalid block index in data: {}", idx);
+                    }
+                }
+
                 let mut cached_palette_indexes: HashMap<&Block, i64> = HashMap::new();
                 for (block_coords, block) in pending_blocks {
                     let is_in_palette = palette.iter().any(|c| block == c);
@@ -340,26 +347,48 @@ impl Region {
                     palette_count[*index as usize] += 1;
                 }
 
+                // this function may be faster but "something" is wrong with it
+                // broder kan inte programmering, lär dig programmering tack q:^)
+                /*
                 let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
-
+                
                 let mut len = palette.len();
                 let mut i = len - 1;
                 while i != 0 {
                     if palette_count[i] == 0 {
                         palette.remove(i);
                         len -= 1;
-
+                        
                         for j in i..len {
                             palette_offsets[j as usize] += 1;
                         }
                     }
                     i -= 1;
                 }
-
+                
                 for block in 0..old_indexes.len() {
                     old_indexes[block] -= palette_offsets[old_indexes[block] as usize];
                 }
+                */
 
+                let mut unused_indexes = Vec::new();
+                for (idx, _p) in palette.iter().enumerate() {
+                    if old_indexes.contains(&(idx as i64)) {
+                        continue;
+                    }
+
+                    unused_indexes.push(idx as i64);
+                }
+
+                for index in unused_indexes.iter().rev() {
+                    palette.remove(*index as usize);
+                    for block in old_indexes.iter_mut() {
+                        if *block > *index {
+                            *block -= 1;
+                        }
+                    }
+                }
+                
                 // remove any marked block entities
                 block_entities.retain(|be| {
                     let x = be.int("x").unwrap() & 15;
