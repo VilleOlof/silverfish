@@ -268,13 +268,12 @@ impl Region {
                 };
                 let data = unsafe { (*state_ptr).long_array("data") };
 
-                let bit_count: u32 = get_bit_count(palette.len());
-
                 // if no data found we directly skip to a pre-defined zeroed vec
                 let mut old_indexes = match data {
                     Some(data) => {
                         let mut old_indexes: Vec<i64> = Vec::with_capacity(4096);
 
+                        let bit_count: u32 = get_bit_count(palette.len());
                         let mut offset: u32 = 0;
 
                         let mask = (1 << bit_count) - 1;
