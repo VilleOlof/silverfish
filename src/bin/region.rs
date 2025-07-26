@@ -3,7 +3,7 @@ use std::{fs::File, time::Instant};
 use rust_edit::{nbt::Block, region::Region};
 
 fn main() {
-    let mut region = Region::full_empty();
+    let mut region = Region::full_empty((-1,0));
     let write_instant = Instant::now();
     region.set_block(2, 80, 2, Block::new("beacon"));
     region.write_blocks();
@@ -25,5 +25,5 @@ fn main() {
     println!("{:?}", region.get_block(2, 80, 2));
     println!("took {:?} to get block", get_instant.elapsed());
 
-    region.write(&mut File::create("./r.0.0.mca").unwrap());
+    region.write(&mut File::create("./r.-1.0.mca").unwrap());
 }

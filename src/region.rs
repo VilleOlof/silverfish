@@ -17,6 +17,7 @@ pub struct Region {
     pub chunks: HashMap<(u8, u8), NbtCompound>,
     pending_blocks: HashMap<(u32, i32, u32), Block>,
     pub config: Config,
+    pub region_coords: (i32, i32),
 }
 
 #[derive(Debug, Clone)]
@@ -45,10 +46,11 @@ impl Region {
     ///
     /// [`Config::create_chunk_if_missing`] will set to `true` from this  
     #[inline(always)]
-    pub fn empty() -> Self {
+    pub fn empty(region_coords: (i32, i32)) -> Self {
         Self {
             chunks: HashMap::new(),
             pending_blocks: HashMap::new(),
+            region_coords,
             config: Config {
                 create_chunk_if_missing: true,
                 ..Default::default()
@@ -58,12 +60,12 @@ impl Region {
 
     /// Creates a full [`Region`] with empty chunks in it.  
     #[inline(always)]
-    pub fn full_empty() -> Self {
+    pub fn full_empty(region_coords: (i32, i32)) -> Self {
         let mut chunks = HashMap::new();
 
         for x in 0..mca::REGION_SIZE as u8 {
             for z in 0..mca::REGION_SIZE as u8 {
-                chunks.insert((x, z), get_empty_chunk((x, z)));
+                chunks.insert((x, z), get_empty_chunk((x, z), region_coords));
             }
         }
 
@@ -77,6 +79,7 @@ impl Region {
             chunks,
             pending_blocks: HashMap::new(),
             config: Config::default(),
+            region_coords: (0, 0), // default region coords
         }
     }
 
@@ -193,7 +196,7 @@ impl Region {
                 None if self.config.create_chunk_if_missing => {
                     self.chunks.insert(
                         chunk_group.coordinate,
-                        get_empty_chunk(chunk_group.coordinate),
+                        get_empty_chunk(chunk_group.coordinate, self.region_coords),
                     );
                     self.chunks.get_mut(&chunk_group.coordinate).unwrap()
                 }
@@ -554,7 +557,7 @@ fn get_bit_count(len: usize) -> u32 {
 /// Generates an empty chunk with plains as the default biome and air in all sections  
 ///
 /// DataVersion is defaulted to [`Region::MIN_LIGHT_DATA_VERSION`]
-pub fn get_empty_chunk(coords: (u8, u8)) -> NbtCompound {
+pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompound {
     let mut sections: Vec<NbtCompound> = vec![];
 
     for y in -4..=19 {
@@ -589,8 +592,8 @@ pub fn get_empty_chunk(coords: (u8, u8)) -> NbtCompound {
         ("sections".into(), NbtTag::List(NbtList::Compound(sections))),
         ("block_entities".into(), NbtTag::List(NbtList::Empty)),
         ("isLightOn".into(), NbtTag::Byte(0)),
-        ("xPos".into(), NbtTag::Int(coords.0 as i32)),
-        ("zPos".into(), NbtTag::Int(coords.1 as i32)),
+        ("xPos".into(), NbtTag::Int((region_coords.0 * 32) + coords.0 as i32)),
+        ("zPos".into(), NbtTag::Int((region_coords.1 * 32) + coords.1 as i32)),
     ]);
 
     chunk
