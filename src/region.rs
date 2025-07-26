@@ -178,7 +178,6 @@ impl Region {
             offset = 0;
         }
 
-        println!("{palette:?}");
         let palette_index = indexes[index as usize] as usize;
         let block = palette.get(palette_index).unwrap();
         return Block::from_compound(block).unwrap();
