@@ -44,6 +44,7 @@ impl Region {
     /// Creates an empty [`Region`] with no chunks or anything.  
     ///
     /// [`Config::create_chunk_if_missing`] will set to `true` from this  
+    #[inline(always)]
     pub fn empty() -> Self {
         Self {
             chunks: HashMap::new(),
@@ -56,6 +57,7 @@ impl Region {
     }
 
     /// Creates a full [`Region`] with empty chunks in it.  
+    #[inline(always)]
     pub fn full_empty() -> Self {
         let mut chunks = HashMap::new();
 
@@ -69,6 +71,7 @@ impl Region {
     }
 
     /// Creates a new [`Region`] with chunks from `chunks`
+    #[inline(always)]
     pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>) -> Self {
         Self {
             chunks,
@@ -523,6 +526,7 @@ impl PartialEq<&NbtCompound> for &Block {
 // returns the bit count for whatever palette_len.
 // we dont actually need to calculate anything fancy
 // palette_len cant be more than 4096 so we can pre set it up
+#[inline(always)]
 fn get_bit_count(len: usize) -> u32 {
     match len {
         0 => 0,
