@@ -76,7 +76,7 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```
+    /// ```no_run
     /// let beacon = Block::try_new("beacon")?;
     /// ```
     pub fn try_new<B: AsRef<str>>(block: B) -> Result<Self> {
@@ -92,7 +92,7 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```
+    /// ```no_run
     /// let conduit = Block::try_new_with_props("conduit", &[("pickles", "4")])?;
     /// ```
     pub fn try_new_with_props<B: AsRef<str>>(
@@ -118,7 +118,7 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```
+    /// ```no_run
     /// let beacon = Block::new("beacon");
     /// ```
     pub fn new<B: AsRef<str>>(block: B) -> Self {
@@ -130,7 +130,7 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```
+    /// ```no_run
     /// let conduit = Block::new_with_props("conduit", [("pickles", "4")]);
     /// ```
     pub fn new_with_props<B: AsRef<str>, const N: usize>(

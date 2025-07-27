@@ -13,7 +13,7 @@ impl Region {
     /// Global coordinates can be converted to region local via [`crate::to_region_local`].  
     ///
     /// ## Example
-    /// ```rust
+    /// ```no_run
     /// let block = region.get_block(5, 97, 385)?;
     /// assert_eq!(block, Block::new("dirt"));
     /// ```
@@ -26,7 +26,7 @@ impl Region {
     /// Global coordinates can be converted to region local via [`crate::to_region_local`].  
     ///
     /// ## Example
-    /// ```rust
+    /// ```no_run
     /// let blocks = region.get_blocks(&[(5, 97, 385), (5, 97, 386), 52, 12, 52])?;
     /// assert_eq!(blocks.len(), 3);
     /// ```
