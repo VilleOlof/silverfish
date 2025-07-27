@@ -1,6 +1,6 @@
 //! `get` contains functions related to getting blocks from a [`Region`].  
 
-use crate::{Block, Error, NbtConversion, Region, Result, region::get_bit_count};
+use crate::{Block, Error, Region, Result, region::get_bit_count};
 
 impl Region {
     /// Returns the block at the specified coordinates *(local to within the region)*.  

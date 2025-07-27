@@ -5,28 +5,23 @@ use simdnbt::{
     Mutf8Str, Mutf8String,
     owned::{NbtCompound, NbtTag},
 };
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{borrow::Cow, collections::BTreeMap, fmt::Debug};
 
-pub trait NbtConversion {
-    fn from_compound(tag: &NbtCompound) -> Result<Self>
-    where
-        Self: Sized;
-    fn to_compound(self) -> Result<NbtCompound>;
-}
-
-/// A Minecraft [Block](https://minecraft.wiki/w/Block), used when setting blocks or when retrieving blocks
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct Block {
-    pub name: NbtString,
-    pub properties: Option<BTreeMap<NbtString, NbtString>>,
-}
-
+/// A [`Mutf8String`] in disguise. (See it for more info on this string type)
+///
+/// Wrapper for it since [`Mutf8String`] doesn't implement [`Hash`].  
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NbtString(Vec<u8>);
+pub struct NbtString(pub(crate) Vec<u8>);
 
 impl Into<Mutf8String> for NbtString {
     fn into(self) -> Mutf8String {
         Self::to_mutf8string(self)
+    }
+}
+
+impl Into<NbtString> for &str {
+    fn into(self) -> NbtString {
+        NbtString::from_str(&self).expect("Failed to convert str to NbtString")
     }
 }
 
@@ -46,10 +41,120 @@ impl NbtString {
     pub fn to_mutf8str(&self) -> &Mutf8Str {
         Mutf8Str::from_slice(&self.0)
     }
+
+    pub fn from_str(value: &str) -> Result<Self> {
+        NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&value))).ok_or(Error::InvalidNbtType(
+            "Failed to convert str to mutf8str & nbtstring",
+        ))
+    }
+
+    pub fn to_str(&self) -> Cow<'_, str> {
+        self.to_mutf8str().to_str()
+    }
+
+    pub fn to_string(&self) -> String {
+        self.to_mutf8str().to_string()
+    }
+
+    pub fn inner(&self) -> &Vec<u8> {
+        &self.0
+    }
 }
 
-impl NbtConversion for Block {
-    fn from_compound(tag: &NbtCompound) -> Result<Self> {
+/// A Minecraft [Block](https://minecraft.wiki/w/Block), used when setting blocks or when retrieving blocks
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Block {
+    pub name: NbtString,
+    pub properties: Option<BTreeMap<NbtString, NbtString>>,
+}
+
+impl Block {
+    /// Tries to create a new block from it's id.  
+    ///
+    /// Fails if the id is an invalid [`Mutf8String`]  
+    ///
+    /// Auto populates into minecraft namespace if no namespace was given
+    ///
+    /// ## Example
+    /// ```
+    /// let beacon = Block::try_new("beacon")?;
+    /// ```
+    pub fn try_new<B: AsRef<str>>(block: B) -> Result<Self> {
+        let name = Self::populate_namespace(&block.as_ref());
+        Ok(Block {
+            name: NbtString::from_str(&name)?,
+            properties: None,
+        })
+    }
+
+    /// Tries to create a new block from it's id and properties
+    ///
+    /// Auto populates into minecraft namespace if no namespace was given
+    ///
+    /// ## Example
+    /// ```
+    /// let conduit = Block::try_new_with_props("conduit", &[("pickles", "4")])?;
+    /// ```
+    pub fn try_new_with_props<B: AsRef<str>>(
+        block: B,
+        properties: &[(&str, &str)],
+    ) -> Result<Self> {
+        let name = Self::populate_namespace(&block.as_ref());
+        let mut props = BTreeMap::new();
+        for (k, v) in properties {
+            let k = NbtString::from_str(&k)?;
+            let v = NbtString::from_str(&v)?;
+            props.insert(k, v);
+        }
+
+        Ok(Block {
+            name: NbtString::from_str(&name)?,
+            properties: Some(props),
+        })
+    }
+
+    /// Creates a new block from just an id
+    ///
+    /// Auto populates into minecraft namespace if no namespace was given
+    ///
+    /// ## Example
+    /// ```
+    /// let beacon = Block::new("beacon");
+    /// ```
+    pub fn new<B: AsRef<str>>(block: B) -> Self {
+        Self::try_new(block).unwrap()
+    }
+
+    /// Creates a new block
+    ///
+    /// Auto populates into minecraft namespace if no namespace was given
+    ///
+    /// ## Example
+    /// ```
+    /// let conduit = Block::new_with_props("conduit", [("pickles", "4")]);
+    /// ```
+    pub fn new_with_props<B: AsRef<str>, const N: usize>(
+        block: B,
+        properties: [(&str, &str); N],
+    ) -> Self {
+        Self::try_new_with_props(block, &properties).unwrap()
+    }
+
+    /// Populates a namespace to the id if none is given.  
+    ///
+    /// Defaults to `minecraft:<id>`
+    pub(crate) fn populate_namespace(id: &str) -> Cow<'_, str> {
+        if !id.contains(":") {
+            Cow::Owned(String::from("minecraft:") + &id)
+        } else {
+            Cow::Borrowed(id)
+        }
+    }
+
+    /// Converts the NbtCompound to a [`Block`].  
+    ///
+    /// This should be the actual compound that contains the fields.
+    pub fn from_compound(tag: &NbtCompound) -> Result<Self> {
         let name =
             NbtString::from_mutf8str(tag.string("Name")).ok_or(Error::MissingNbtTag("Name"))?;
 
@@ -75,7 +180,10 @@ impl NbtConversion for Block {
         Ok(Block { name, properties })
     }
 
-    fn to_compound(self) -> Result<NbtCompound> {
+    /// Converts [`Block`] to a [`NbtCompound`]  
+    ///
+    /// Skips writing `properties` if `None` or empty
+    pub fn to_compound(self) -> Result<NbtCompound> {
         let mut tag = NbtCompound::new();
         tag.insert("Name", NbtTag::String(self.name.into()));
         if let Some(props) = self.properties {
@@ -95,6 +203,9 @@ impl NbtConversion for Block {
 
 impl Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // writes it in format of "<id>" if only id
+        // if props, then <id>[<key> = <value>, <key> = <value>, ...]
+        // a bit like how minecraft stores the block in snbt but its not snbt
         write!(
             f,
             "{}{}",
@@ -119,61 +230,6 @@ impl Debug for Block {
     }
 }
 
-impl Block {
-    /// Creates a new block from just an id
-    ///
-    /// Auto populates into minecraft namespace if no namespace was given
-    pub fn new<B: AsRef<str>>(block: B) -> Self {
-        let name = block.as_ref().to_string();
-        Block {
-            name: if name.contains(":") {
-                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&name)))
-                    .expect("Failed to convert block name to Mutf8Str")
-            } else {
-                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(
-                    &(String::from("minecraft:") + &name),
-                )))
-                .expect("Failed to convert block name to Mutf8Str")
-            },
-            properties: None,
-        }
-    }
-
-    /// Creates a new block
-    ///
-    /// Auto populates into minecraft namespace if no namespace was given
-    ///
-    /// ## Example
-    /// ```
-    /// let conduit = Block::new_with_props("conduit", [("pickles", "4")]);
-    /// ```
-    pub fn new_with_props<B: AsRef<str>, const N: usize>(
-        block: B,
-        properties: [(&str, &str); N],
-    ) -> Self {
-        let name = block.as_ref().to_string();
-        Block {
-            name: if name.contains(":") {
-                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&name)))
-                    .expect("Failed to convert block name to Mutf8Str")
-            } else {
-                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(
-                    &(String::from("minecraft:") + &name),
-                )))
-                .expect("Failed to convert block name to Mutf8Str")
-            },
-            properties: Some(BTreeMap::from(properties.map(|(k, v)| {
-                //
-                let k = NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&k)))
-                    .expect("Failed to convert block property key to Mutf8Str");
-                let v = NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&v)))
-                    .expect("Failed to convert block property value to Mutf8Str");
-                (k, v)
-            }))),
-        }
-    }
-}
-
 /// A custom PartialEq implementation so we dont need to convert NbtCompound to Block  
 /// or Block to NbtCompound and can compare them fast
 impl PartialEq<&NbtCompound> for &Block {
@@ -182,7 +238,7 @@ impl PartialEq<&NbtCompound> for &Block {
             Some(n) => n,
             None => return false,
         };
-        if self.name.to_mutf8str().to_str() != name.to_str() {
+        if self.name.to_mutf8str() != name {
             return false;
         }
 

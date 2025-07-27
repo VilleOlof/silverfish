@@ -2,7 +2,7 @@
 //! to it's chunks within the [`Region`], handles batching, encoding/decoding section data, etc.  
 
 use crate::{
-    Block, Error, NbtConversion, Region, Result, get_empty_chunk,
+    Block, Error, Region, Result, get_empty_chunk,
     region::{BlockWithCoordinate, ChunkGroup, get_bit_count},
 };
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
