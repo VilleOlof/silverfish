@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fmt::Debug};
 
 use simdnbt::{
-    Mutf8Str,
+    Mutf8Str, Mutf8String,
     owned::{NbtCompound, NbtList, NbtTag},
 };
 
@@ -37,8 +37,35 @@ pub struct BlockStates {
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Block {
-    pub name: String,
-    pub properties: Option<BTreeMap<String, String>>,
+    pub name: NbtString,
+    pub properties: Option<BTreeMap<NbtString, NbtString>>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NbtString(Vec<u8>);
+
+impl Into<Mutf8String> for NbtString {
+    fn into(self) -> Mutf8String {
+        Self::to_mutf8string(self)
+    }
+}
+
+impl NbtString {
+    pub fn from_mutf8str(string: Option<&Mutf8Str>) -> Option<Self> {
+        let data = string.map(|s| s.as_bytes().to_vec());
+        match data {
+            Some(d) => Some(Self(d)),
+            None => None,
+        }
+    }
+
+    pub fn to_mutf8string(self) -> Mutf8String {
+        Mutf8String::from_vec(self.0)
+    }
+
+    pub fn to_mutf8str(&self) -> &Mutf8Str {
+        Mutf8Str::from_slice(&self.0)
+    }
 }
 
 impl NbtConversion for Section {
@@ -167,13 +194,9 @@ impl NbtConversion for BlockStates {
 
 impl NbtConversion for Block {
     fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
-        let name = tag
-            .string("Name")
-            .ok_or(RustEditError::NbtError(
-                "Missing 'name' in section palette".into(),
-            ))?
-            .to_str()
-            .to_string();
+        let name = NbtString::from_mutf8str(tag.string("Name")).ok_or(RustEditError::NbtError(
+            "Missing 'name' in section palette".into(),
+        ))?;
 
         let properties = match tag.compound("Properties") {
             // skip calculating if empty
@@ -183,13 +206,12 @@ impl NbtConversion for Block {
 
                 for (k, v) in props.iter() {
                     new_properties.insert(
-                        k.to_str().to_string(),
-                        v.string()
-                            .ok_or(RustEditError::NbtError(
-                                "Property value is not a string in section block palette".into(),
-                            ))?
-                            .to_str()
-                            .to_string(),
+                        NbtString::from_mutf8str(Some(k)).ok_or(RustEditError::NbtError(
+                            "Property key is not a string in section block palette".into(),
+                        ))?,
+                        NbtString::from_mutf8str(v.string()).ok_or(RustEditError::NbtError(
+                            "Property value is not a string in section block palette".into(),
+                        ))?,
                     );
                 }
                 Some(new_properties)
@@ -202,16 +224,13 @@ impl NbtConversion for Block {
 
     fn to_compound(self) -> Result<NbtCompound, RustEditError> {
         let mut tag = NbtCompound::new();
-        tag.insert(
-            "Name",
-            NbtTag::String(Mutf8Str::from_str(&self.name).into_owned()),
-        );
+        tag.insert("Name", NbtTag::String(self.name.into()));
         if let Some(props) = self.properties {
             // skip writing if properties is empty
             if !props.is_empty() {
                 let mut props_tag = NbtCompound::new();
                 for (k, v) in props {
-                    props_tag.insert(k, NbtTag::String(Mutf8Str::from_str(&v).into_owned()));
+                    props_tag.insert(k, NbtTag::String(v.into()));
                 }
                 tag.insert("Properties", props_tag);
             }
@@ -249,13 +268,17 @@ impl Debug for Block {
         write!(
             f,
             "{}{}",
-            self.name,
+            self.name.to_mutf8str().to_str(),
             if let Some(props) = &self.properties {
                 format!(
                     "[{}]",
                     props
                         .iter()
-                        .map(|(k, v)| format!("{k}={v}"))
+                        .map(|(k, v)| format!(
+                            "{}={}",
+                            k.to_mutf8str().to_str(),
+                            v.to_mutf8str().to_str()
+                        ))
                         .collect::<Vec<String>>()
                         .join(", ")
                 )
@@ -274,9 +297,13 @@ impl Block {
         let name = block.as_ref().to_string();
         Block {
             name: if name.contains(":") {
-                name
+                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&name)))
+                    .expect("Failed to convert block name to Mutf8Str")
             } else {
-                String::from("minecraft:") + &name
+                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(
+                    &(String::from("minecraft:") + &name),
+                )))
+                .expect("Failed to convert block name to Mutf8Str")
             },
             properties: None,
         }
@@ -297,13 +324,22 @@ impl Block {
         let name = block.as_ref().to_string();
         Block {
             name: if name.contains(":") {
-                name
+                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&name)))
+                    .expect("Failed to convert block name to Mutf8Str")
             } else {
-                String::from("minecraft:") + &name
+                NbtString::from_mutf8str(Some(&Mutf8Str::from_str(
+                    &(String::from("minecraft:") + &name),
+                )))
+                .expect("Failed to convert block name to Mutf8Str")
             },
-            properties: Some(BTreeMap::from(
-                properties.map(|(k, v)| (k.to_string(), v.to_string())),
-            )),
+            properties: Some(BTreeMap::from(properties.map(|(k, v)| {
+                //
+                let k = NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&k)))
+                    .expect("Failed to convert block property key to Mutf8Str");
+                let v = NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&v)))
+                    .expect("Failed to convert block property value to Mutf8Str");
+                (k, v)
+            }))),
         }
     }
 }

@@ -4,7 +4,6 @@ use rust_edit::{nbt::Block, region::Region};
 
 fn main() {
     let mut region = Region::full_empty((-1, 0));
-    let write_instant = Instant::now();
     region.set_block(2, 80, 2, Block::new("beacon"));
     let write_instant = Instant::now();
     region.write_blocks();

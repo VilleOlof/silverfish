@@ -1,29 +1,32 @@
-use crate::nbt::{Block, NbtConversion};
+use crate::nbt::{Block, NbtConversion, NbtString};
 use fixedbitset::FixedBitSet;
 use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
     collections::{BTreeMap, HashMap},
+    fmt::Debug,
     io::{Cursor, Read, Write},
 };
 
 // so ive tested filling an entire region with 1 single block
 //  (best case scenario for palette cache)
-// and got a throughput of `2,765,475` blocks per second*
+// and got a throughput of `3,176,500` blocks per second*
 // on my machine with optimized compiler flags
 
 /// An in-memory region to read and write blocks to the chunks within.  
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Region {
+    /// The chunks within the Region, mapped to their coordinates
     pub chunks: HashMap<(u8, u8), NbtCompound>,
+    /// Config on how it should handle certain scenarios
     pub config: Config,
+    /// Coordinates for this specific region
+    pub region_coords: (i32, i32),
 
     /// buffered blocks that is about to be written to `chunks`
     pending_blocks: Vec<BlockWithCoordinate>,
     /// blocks we've already pushed to `pending_blocks` to avoid duplicate coordinate blocks
     seen_blocks: FixedBitSet,
-
-    pub region_coords: (i32, i32),
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +52,20 @@ impl Default for Config {
             create_chunk_if_missing: false,
             update_lighting: true,
         }
+    }
+}
+
+impl Debug for Region {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Region({}, {})\n  > chunks: {}\n  > buffered blocks: {}\n  > {:?}",
+            self.region_coords.0,
+            self.region_coords.1,
+            self.chunks.len(),
+            self.pending_blocks.len(),
+            self.config
+        )
     }
 }
 
@@ -95,18 +112,18 @@ impl Region {
             }
         }
 
-        Self::from_nbt(chunks)
+        Self::from_nbt(chunks, region_coords)
     }
 
     /// Creates a new [`Region`] with chunks from `chunks`
     #[inline(always)]
-    pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>) -> Self {
+    pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>, region_coords: (i32, i32)) -> Self {
         Self {
             chunks,
             pending_blocks: vec![],
             seen_blocks: Self::get_default_bitset(),
             config: Config::default(),
-            region_coords: (0, 0), // default region coords
+            region_coords,
         }
     }
 
@@ -116,7 +133,7 @@ impl Region {
     /// ```rust
     /// let mut region = Region::from_region(&mut File::open("r.0.0.mca").unwrap());
     /// ```
-    pub fn from_region<R: Read>(reader: &mut R) -> Self {
+    pub fn from_region<R: Read>(reader: &mut R, region_coords: (i32, i32)) -> Self {
         let mut bytes = vec![];
         reader.read_to_end(&mut bytes).unwrap();
         let region_reader = RegionReader::new(&bytes).unwrap();
@@ -138,7 +155,7 @@ impl Region {
             chunks.insert((x as u8, z as u8), chunk_nbt);
         }
 
-        Self::from_nbt(chunks)
+        Self::from_nbt(chunks, region_coords)
     }
 
     /// Set a block at the specified coordinates *(local to within the region)*.  
@@ -240,12 +257,18 @@ impl Region {
     }
 
     /// Takes all pending block writes and applies all the blocks to the actual chunk NBT
+    ///
+    /// Clears the internal buffered blocks instantly.  
+    /// So if this function fails, do note that any blocks sent in via [`Self::set_block`] will get cleared.  
     pub fn write_blocks(&mut self) {
         let pending_blocks = std::mem::take(&mut self.pending_blocks);
         let mut groups = group_blocks_into_chunks(pending_blocks);
         // reset seen_blocks already here since we swapped pending_blocks with default
         self.seen_blocks = Self::get_default_bitset();
 
+        // theres probably some way to convert this into a rayon par_iter or something
+        // so this can be heavily faster, the only annoying thing is since this is all mutable reference to self.chunks
+        // we cant Mutex: Self or self.chunks and lock because the entire "thread" needs to use a mutable ref constantly
         for chunk_group in groups.iter_mut() {
             let chunk = match self.chunks.get_mut(&chunk_group.coordinate) {
                 Some(chunk) => chunk,
@@ -407,9 +430,6 @@ impl Region {
                     palette_count[*index as usize] += 1;
                 }
 
-                // this function may be faster but "something" is wrong with it
-                // broder kan inte programmering, lär dig programmering tack q:^)
-                /*
                 let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
 
                 let mut len = palette.len();
@@ -428,25 +448,6 @@ impl Region {
 
                 for block in 0..old_indexes.len() {
                     old_indexes[block] -= palette_offsets[old_indexes[block] as usize];
-                }
-                */
-
-                let mut unused_indexes = Vec::new();
-                for (idx, _p) in palette.iter().enumerate() {
-                    if old_indexes.contains(&(idx as i64)) {
-                        continue;
-                    }
-
-                    unused_indexes.push(idx as i64);
-                }
-
-                for index in unused_indexes.iter().rev() {
-                    palette.remove(*index as usize);
-                    for block in old_indexes.iter_mut() {
-                        if *block > *index {
-                            *block -= 1;
-                        }
-                    }
                 }
 
                 // remove any marked block entities
@@ -554,7 +555,7 @@ impl PartialEq<&NbtCompound> for &Block {
             Some(n) => n,
             None => return false,
         };
-        if self.name != name.to_str() {
+        if self.name.to_mutf8str().to_str() != name.to_str() {
             return false;
         }
 
@@ -564,12 +565,12 @@ impl PartialEq<&NbtCompound> for &Block {
                 None => return false,
             };
 
-            let mut other_map: BTreeMap<String, String> = BTreeMap::new();
+            let mut other_map: BTreeMap<NbtString, NbtString> = BTreeMap::new();
 
             for (k, v) in props.iter() {
                 other_map.insert(
-                    k.to_str().to_string(),
-                    v.string().unwrap().to_str().to_string(),
+                    NbtString::from_mutf8str(Some(&k)).unwrap(),
+                    NbtString::from_mutf8str(v.string()).unwrap(),
                 );
             }
 
