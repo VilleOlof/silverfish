@@ -3,14 +3,15 @@ use std::{fs::File, time::Instant};
 use rust_edit::{nbt::Block, region::Region};
 
 fn main() {
-    let mut region = Region::full_empty((-1,0));
+    let mut region = Region::full_empty((-1, 0));
     let write_instant = Instant::now();
     region.set_block(2, 80, 2, Block::new("beacon"));
+    let write_instant = Instant::now();
     region.write_blocks();
     println!("took {:?} to set block", write_instant.elapsed());
 
     // // full region write
-    // let write_instant = Instant::now();
+    // let loop_instant = Instant::now();
     // for x in 0..512 {
     //     for y in -64i32..320i32 {
     //         for z in 0..512 {
@@ -18,8 +19,14 @@ fn main() {
     //         }
     //     }
     // }
+    // println!("took {:?} to loop, writing...", loop_instant.elapsed());
+    // let write_instant = Instant::now();
     // region.write_blocks();
-    // println!("took {:?} to set block", write_instant.elapsed());
+    // println!(
+    //     "took {:?} to set block, total: {:?}",
+    //     write_instant.elapsed(),
+    //     loop_instant.elapsed()
+    // );
 
     let get_instant = Instant::now();
     println!("{:?}", region.get_block(2, 80, 2));

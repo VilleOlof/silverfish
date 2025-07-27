@@ -1,4 +1,5 @@
 use crate::nbt::{Block, NbtConversion};
+use fixedbitset::FixedBitSet;
 use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
@@ -8,16 +9,32 @@ use std::{
 
 // so ive tested filling an entire region with 1 single block
 //  (best case scenario for palette cache)
-// and got a throughput of `1,936,204` blocks per second*
+// and got a throughput of `2,765,475` blocks per second*
 // on my machine with optimized compiler flags
 
 /// An in-memory region to read and write blocks to the chunks within.  
 #[derive(Debug, Clone)]
 pub struct Region {
     pub chunks: HashMap<(u8, u8), NbtCompound>,
-    pending_blocks: HashMap<(u32, i32, u32), Block>,
     pub config: Config,
+
+    /// buffered blocks that is about to be written to `chunks`
+    pending_blocks: Vec<BlockWithCoordinate>,
+    /// blocks we've already pushed to `pending_blocks` to avoid duplicate coordinate blocks
+    seen_blocks: FixedBitSet,
+
     pub region_coords: (i32, i32),
+}
+
+#[derive(Debug, Clone)]
+struct BlockWithCoordinate {
+    coords: (u32, i32, u32),
+    block: Block,
+}
+
+struct ChunkGroup {
+    pub coordinate: (u8, u8),
+    pub sections: HashMap<i8, Vec<BlockWithCoordinate>>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +59,14 @@ impl Region {
     /// since "isLightOn" was added in 1.18 (i think)
     pub const MIN_LIGHT_DATA_VERSION: i32 = 2860;
 
+    // some constants for the FixedBitSet & indexes
+    const REGION_X_Z_WIDTH: usize = 512;
+    const REGION_Y_MIN: isize = -64;
+    const REGION_Y_MAX: isize = 320;
+    const REGION_Y_WIDTH: usize = (Self::REGION_Y_MAX - Self::REGION_Y_MIN) as usize;
+    const BITSET_SIZE: usize =
+        Self::REGION_X_Z_WIDTH * Self::REGION_Y_WIDTH * Self::REGION_X_Z_WIDTH;
+
     /// Creates an empty [`Region`] with no chunks or anything.  
     ///
     /// [`Config::create_chunk_if_missing`] will set to `true` from this  
@@ -49,7 +74,8 @@ impl Region {
     pub fn empty(region_coords: (i32, i32)) -> Self {
         Self {
             chunks: HashMap::new(),
-            pending_blocks: HashMap::new(),
+            pending_blocks: vec![],
+            seen_blocks: Self::get_default_bitset(),
             region_coords,
             config: Config {
                 create_chunk_if_missing: true,
@@ -77,7 +103,8 @@ impl Region {
     pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>) -> Self {
         Self {
             chunks,
-            pending_blocks: HashMap::new(),
+            pending_blocks: vec![],
+            seen_blocks: Self::get_default_bitset(),
             config: Config::default(),
             region_coords: (0, 0), // default region coords
         }
@@ -87,7 +114,7 @@ impl Region {
     ///
     /// ## Example
     /// ```rust
-    /// let region = Region::from_region(&mut File::open("r.0.0.mca").unwrap());
+    /// let mut region = Region::from_region(&mut File::open("r.0.0.mca").unwrap());
     /// ```
     pub fn from_region<R: Read>(reader: &mut R) -> Self {
         let mut bytes = vec![];
@@ -116,7 +143,7 @@ impl Region {
 
     /// Set a block at the specified coordinates *(local to within the region)*.  
     ///
-    /// Returns true if there was previously a block at this coordinate in the buffer.  
+    /// Returns [`None`] if a buffered block already exists at those coordinates.  
     ///
     /// **Note:** This doesn't actually set the block but writes it to an internal buffer.  
     ///
@@ -124,13 +151,38 @@ impl Region {
     ///
     /// ## Example
     /// ```rust
-    /// region.set_block(5, 97, 385, Block::new("dirt"));
+    /// let _ = region.set_block(5, 97, 385, Block::new("dirt"));
     /// // and to actually write the changes to the NBT
     /// region.write_blocks();
     /// ```
     #[inline(always)]
-    pub fn set_block(&mut self, x: u32, y: i32, z: u32, block: Block) -> bool {
-        self.pending_blocks.insert((x, y, z), block).is_some()
+    pub fn set_block(&mut self, x: u32, y: i32, z: u32, block: Block) -> Option<()> {
+        let index = self.get_block_index(x, y, z);
+        if !self.seen_blocks.contains(index) {
+            self.seen_blocks.insert(index);
+            self.pending_blocks.push(BlockWithCoordinate {
+                coords: (x, y, z),
+                block,
+            });
+            return Some(());
+        }
+
+        None
+    }
+
+    /// Returns the index for a block in the [`Self::seen_blocks`] bitset based of it's coordinates  
+    #[inline(always)]
+    fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
+        let y_offset = (y as isize - Self::REGION_Y_MIN) as usize;
+        x as usize
+            + y_offset * Self::REGION_X_Z_WIDTH
+            + z as usize * Self::REGION_X_Z_WIDTH * Self::REGION_Y_WIDTH
+    }
+
+    /// Returns a [`FixedBitSet`] with a default capacity that holds an entire regions blocks for check  
+    #[inline(always)]
+    fn get_default_bitset() -> FixedBitSet {
+        FixedBitSet::with_capacity(Self::BITSET_SIZE)
     }
 
     /// Returns the block at the specified coordinates *(local to within the region)*.  
@@ -170,9 +222,10 @@ impl Region {
         let mut indexes: Vec<i64> = Vec::with_capacity(4096);
 
         let mut offset: u32 = 0;
+        let mask = (1 << bit_count) - 1;
         for data_block in data.iter() {
             while (offset * bit_count) + bit_count <= 64 {
-                let block = (data_block >> (offset * bit_count)) & ((1 << bit_count) - 1);
+                let block = (data_block >> (offset * bit_count)) & mask;
 
                 indexes.push(block);
 
@@ -188,9 +241,12 @@ impl Region {
 
     /// Takes all pending block writes and applies all the blocks to the actual chunk NBT
     pub fn write_blocks(&mut self) {
-        let groups = group_blocks_into_chunks(self.pending_blocks.clone());
+        let pending_blocks = std::mem::take(&mut self.pending_blocks);
+        let mut groups = group_blocks_into_chunks(pending_blocks);
+        // reset seen_blocks already here since we swapped pending_blocks with default
+        self.seen_blocks = Self::get_default_bitset();
 
-        for chunk_group in groups {
+        for chunk_group in groups.iter_mut() {
             let chunk = match self.chunks.get_mut(&chunk_group.coordinate) {
                 Some(chunk) => chunk,
                 None if self.config.create_chunk_if_missing => {
@@ -250,7 +306,7 @@ impl Region {
 
             for section in sections.iter_mut() {
                 let y = section.byte("Y").unwrap();
-                let pending_blocks = match chunk_group.sections.get(&y) {
+                let pending_blocks = match chunk_group.sections.remove(&y) {
                     Some(pending_blocks) => pending_blocks,
                     None => continue,
                 };
@@ -311,27 +367,28 @@ impl Region {
                 }
 
                 let mut cached_palette_indexes: HashMap<&Block, i64> = HashMap::new();
-                for (block_coords, block) in pending_blocks {
-                    let is_in_palette = palette.iter().any(|c| block == c);
+                for block in &pending_blocks {
+                    let is_in_palette = palette.iter().any(|c| &block.block == c);
 
                     if !is_in_palette {
-                        let block_nbt = block.clone().to_compound().unwrap();
+                        // this is the only .clone() in this entire code and i hate it but i must have it grrr
+                        let block_nbt = block.block.clone().to_compound().unwrap();
                         palette.push(block_nbt);
                     }
-                    let palette_index = match cached_palette_indexes.get(block) {
+                    let palette_index = match cached_palette_indexes.get(&block.block) {
                         Some(idx) => *idx,
                         None => {
                             let palette_index =
-                                palette.iter().position(|c| block == c).unwrap() as i64;
-                            cached_palette_indexes.insert(block, palette_index);
+                                palette.iter().position(|c| &block.block == c).unwrap() as i64;
+                            cached_palette_indexes.insert(&block.block, palette_index);
                             palette_index
                         }
                     };
 
                     let (x, y, z) = (
-                        block_coords.0 & 15,
-                        block_coords.1 & 15,
-                        block_coords.2 & 15,
+                        block.coords.0 & 15,
+                        block.coords.1 & 15,
+                        block.coords.2 & 15,
                     );
                     let index = x + z * 16 + y as u32 * 16 * 16;
 
@@ -354,21 +411,21 @@ impl Region {
                 // broder kan inte programmering, lär dig programmering tack q:^)
                 /*
                 let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
-                
+
                 let mut len = palette.len();
-                let mut i = len - 1;
-                while i != 0 {
-                    if palette_count[i] == 0 {
-                        palette.remove(i);
+                let mut i = len as i32 - 1;
+                while i >= 0 {
+                    if palette_count[i as usize] == 0 {
+                        palette.remove(i as usize);
                         len -= 1;
-                        
-                        for j in i..len {
+
+                        for j in (i as usize)..palette_count.len() {
                             palette_offsets[j as usize] += 1;
                         }
                     }
                     i -= 1;
                 }
-                
+
                 for block in 0..old_indexes.len() {
                     old_indexes[block] -= palette_offsets[old_indexes[block] as usize];
                 }
@@ -391,7 +448,7 @@ impl Region {
                         }
                     }
                 }
-                
+
                 // remove any marked block entities
                 block_entities.retain(|be| {
                     let x = be.int("x").unwrap() & 15;
@@ -460,27 +517,22 @@ impl Region {
     }
 }
 
-struct ChunkGroup {
-    pub coordinate: (u8, u8),
-    pub sections: HashMap<i8, HashMap<(u32, i32, u32), Block>>,
-}
-
 /// Groups a list of blocks into their own sections and chunks within a region  
-fn group_blocks_into_chunks(blocks: HashMap<(u32, i32, u32), Block>) -> Vec<ChunkGroup> {
-    let mut map: HashMap<(u8, u8), HashMap<i8, HashMap<(u32, i32, u32), Block>>> = HashMap::new();
+fn group_blocks_into_chunks(blocks: Vec<BlockWithCoordinate>) -> Vec<ChunkGroup> {
+    let mut map: HashMap<(u8, u8), HashMap<i8, Vec<BlockWithCoordinate>>> = HashMap::new();
 
-    for ((b_x, b_y, b_z), block) in blocks {
+    for block in blocks {
         let (chunk_x, chunk_z) = (
-            (b_x as f64 / 16f64).floor() as u8,
-            (b_z as f64 / 16f64).floor() as u8,
+            (block.coords.0 as f64 / 16f64).floor() as u8,
+            (block.coords.2 as f64 / 16f64).floor() as u8,
         );
-        let section_y = (b_y as f64 / 16f64).floor() as i8;
+        let section_y = (block.coords.1 as f64 / 16f64).floor() as i8;
 
         map.entry((chunk_x, chunk_z))
             .or_default()
             .entry(section_y)
             .or_default()
-            .insert((b_x, b_y, b_z), block);
+            .push(block);
     }
 
     let mut chunk_groups = vec![];
@@ -540,8 +592,7 @@ impl PartialEq<&NbtCompound> for &Block {
 #[inline(always)]
 fn get_bit_count(len: usize) -> u32 {
     match len {
-        0 => 0,
-        1..=16 => 4,
+        0..=16 => 4, // i believe this should be 0..=16 since the old math had a .max(4) at the end, thus always getting 4 at the minimum
         17..=32 => 5,
         33..=64 => 6,
         65..=128 => 7,
@@ -550,7 +601,7 @@ fn get_bit_count(len: usize) -> u32 {
         513..=1024 => 10,
         1025..=2048 => 11,
         2049..=4096 => 12,
-        _ => panic!("invalid palette len"),
+        _ => 13,
     }
 }
 
@@ -592,8 +643,14 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
         ("sections".into(), NbtTag::List(NbtList::Compound(sections))),
         ("block_entities".into(), NbtTag::List(NbtList::Empty)),
         ("isLightOn".into(), NbtTag::Byte(0)),
-        ("xPos".into(), NbtTag::Int((region_coords.0 * 32) + coords.0 as i32)),
-        ("zPos".into(), NbtTag::Int((region_coords.1 * 32) + coords.1 as i32)),
+        (
+            "xPos".into(),
+            NbtTag::Int((region_coords.0 * 32) + coords.0 as i32),
+        ),
+        (
+            "zPos".into(),
+            NbtTag::Int((region_coords.1 * 32) + coords.1 as i32),
+        ),
     ]);
 
     chunk
