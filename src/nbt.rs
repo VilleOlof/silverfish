@@ -13,6 +13,36 @@ use std::{borrow::Cow, collections::BTreeMap, fmt::Debug};
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NbtString(pub(crate) Vec<u8>);
 
+// impl partialeq for nbtstring and str/string
+
+impl PartialEq<str> for NbtString {
+    fn eq(&self, other: &str) -> bool {
+        let str = self.to_str();
+        str == other
+    }
+}
+
+impl PartialEq<NbtString> for str {
+    fn eq(&self, other: &NbtString) -> bool {
+        let str = other.to_str();
+        str == self
+    }
+}
+
+impl PartialEq<String> for NbtString {
+    fn eq(&self, other: &String) -> bool {
+        let str = self.to_str();
+        str == other.as_str()
+    }
+}
+
+impl PartialEq<NbtString> for String {
+    fn eq(&self, other: &NbtString) -> bool {
+        let str = other.to_str();
+        self.as_str() == str
+    }
+}
+
 impl Into<Mutf8String> for NbtString {
     fn into(self) -> Mutf8String {
         Self::to_mutf8string(self)
