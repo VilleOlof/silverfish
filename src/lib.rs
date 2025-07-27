@@ -11,4 +11,4 @@ mod write;
 pub use config::Config;
 pub use error::{Error, Result};
 pub use nbt::{Block, NbtString};
-pub use region::{Region, get_empty_chunk};
+pub use region::{Region, get_empty_chunk, to_region_local};

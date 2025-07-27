@@ -3,7 +3,7 @@
 
 use crate::{
     Block, Error, Region, Result, get_empty_chunk,
-    region::{BlockWithCoordinate, ChunkGroup, get_bit_count},
+    region::{BlockWithCoordinate, get_bit_count},
 };
 use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
 use std::collections::HashMap;
@@ -189,9 +189,9 @@ impl Region {
                     };
 
                     let (x, y, z) = (
-                        block.coords.0 & 15,
-                        block.coords.1 & 15,
-                        block.coords.2 & 15,
+                        block.coordinates.0 & 15,
+                        block.coordinates.1 & 15,
+                        block.coordinates.2 & 15,
                     );
                     let index = (x + z * 16 + y as u32 * 16 * 16) as usize;
 
@@ -282,16 +282,21 @@ impl Region {
     }
 }
 
+pub(crate) struct ChunkGroup {
+    pub coordinate: (u8, u8),
+    pub sections: HashMap<i8, Vec<BlockWithCoordinate>>,
+}
+
 /// Groups a list of blocks into their own sections and chunks within a region  
 fn group_blocks_into_chunks(blocks: Vec<BlockWithCoordinate>) -> Vec<ChunkGroup> {
     let mut map: HashMap<(u8, u8), HashMap<i8, Vec<BlockWithCoordinate>>> = HashMap::new();
 
     for block in blocks {
         let (chunk_x, chunk_z) = (
-            (block.coords.0 as f64 / 16f64).floor() as u8,
-            (block.coords.2 as f64 / 16f64).floor() as u8,
+            (block.coordinates.0 as f64 / 16f64).floor() as u8,
+            (block.coordinates.2 as f64 / 16f64).floor() as u8,
         );
-        let section_y = (block.coords.1 as f64 / 16f64).floor() as i8;
+        let section_y = (block.coordinates.1 as f64 / 16f64).floor() as i8;
 
         map.entry((chunk_x, chunk_z))
             .or_default()

@@ -37,15 +37,10 @@ pub struct Region {
     pub(crate) seen_blocks: FixedBitSet,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct BlockWithCoordinate {
-    pub coords: (u32, i32, u32),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockWithCoordinate {
+    pub coordinates: (u32, i32, u32),
     pub block: Block,
-}
-
-pub(crate) struct ChunkGroup {
-    pub coordinate: (u8, u8),
-    pub sections: HashMap<i8, Vec<BlockWithCoordinate>>,
 }
 
 impl Region {
@@ -107,7 +102,7 @@ impl Region {
     /// Creates a [`Region`] from an already existing region
     ///
     /// ## Example
-    /// ```rust
+    /// ```no_run
     /// let mut region = Region::from_region(&mut File::open("r.0.0.mca")?)?;
     /// ```
     pub fn from_region<R: Read>(reader: &mut R, region_coords: (i32, i32)) -> Result<Self> {
@@ -139,6 +134,12 @@ impl Region {
     ///
     /// **Note:** If you haven't called [`Region::write_blocks`] this will most likely  
     /// just return whatever input you gave it initially
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let mut buf = vec![];
+    /// region.write(&mut buf)?;
+    /// ```
     pub fn write<W: Write>(self, writer: &mut W) -> Result<()> {
         let mut region_writer = RegionWriter::new();
 
@@ -237,4 +238,16 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
     ]);
 
     chunk
+}
+
+/// Converts a piece of global world coordinates to coordinates within it's region.  
+///
+/// ## Example
+/// ```no_run
+/// let coords = (-841, -17, 4821);
+/// let local_coords = to_region_local(coords);
+/// assert_eq!(local_coords, (183, -17, 213))
+/// ```
+pub fn to_region_local(coords: (i32, i32, i32)) -> (u32, i32, u32) {
+    ((coords.0 & 511) as u32, coords.1, (coords.2 & 511) as u32)
 }

@@ -9,6 +9,10 @@ impl Region {
 
     /// Set a block at the specified coordinates *(local to within the region)*.  
     ///
+    /// Global coordinates can be converted to region local via [`crate::to_region_local`].  
+    ///
+    /// ----
+    ///
     /// Returns [`None`] if a buffered block already exists at those coordinates.  
     ///
     /// **Note:** This doesn't actually set the block but writes it to an internal buffer.  
@@ -16,7 +20,7 @@ impl Region {
     /// To actually write the changes to the `chunks`, call [`Region::write_blocks`]
     ///
     /// ## Example
-    /// ```rust
+    /// ```no_run
     /// let _ = region.set_block(5, 97, 385, Block::new("dirt"));
     /// // and to actually write the changes to the NBT
     /// region.write_blocks();
@@ -27,7 +31,7 @@ impl Region {
         if !self.seen_blocks.contains(index) {
             self.seen_blocks.insert(index);
             self.pending_blocks.push(BlockWithCoordinate {
-                coords: (x, y, z),
+                coordinates: (x, y, z),
                 block,
             });
             return Some(());
