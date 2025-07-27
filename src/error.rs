@@ -1,31 +1,44 @@
-use std::io;
+//! `error` contains the [`Error`] type for this crate and a shorthand [`Result`] type.  
 
-use mca::McaError;
-use thiserror::Error;
+use crate::{nbt::Block, region::Region};
 
-use crate::coordinate::Coordinate;
+pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Error, Debug)]
-pub enum RustEditError {
-    #[error("Failed to convert coordinate to another type")]
-    MismatchedCoordinateType(Coordinate),
-    #[error("Invalid operation: {0}")]
-    InvalidOperation(String),
-    // TODO split WorldError into more types, like
-    // look at all the errors in World::flush and stuff and split them
-    // into more unique ones than just "string"
-    #[error("{0}")]
-    WorldError(String),
-    #[error("mca failed: {0}")]
-    McaError(#[from] McaError),
-    // #[error("nbt failed: {0}")]
-    // NbtError(#[from] fastnbt::error::Error),
-    #[error("nbt failed: {0}")]
-    NbtError(String),
-    #[error("simdnbt failed: {0}")]
-    SimdnbtError(#[from] simdnbt::Error),
-    #[error("io failed: {0}")]
-    IoError(#[from] io::Error),
-    #[error("{0}")]
-    Other(String),
+/// Show the [`std::fmt::Display`] of the error to display even further context & info
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Mca(#[from] mca::McaError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Simdnbt(#[from] simdnbt::Error),
+
+    #[error(
+        "Coordinates are outside of regions bounds ({0} || {1} >= {width})",
+        width = Region::REGION_X_Z_WIDTH
+    )]
+    CoordinatesOutOfRegionBounds(u32, u32),
+    #[error("No element at the given index: len is {len} but index is {index}")]
+    OutOfBounds { len: usize, index: usize },
+    #[error("Nbt value at '{0}' was the wrong nbt data type")]
+    InvalidNbtType(&'static str),
+    #[error("Nbt value at '{0}' was the wrong nbt list type")]
+    InvalidNbtList(&'static str),
+    #[error("No Nbt value named '{0}'")]
+    MissingNbtTag(&'static str),
+    #[error("No section found with the Y index {0}")]
+    NoSectionFound(i8),
+    #[error("No chunk found at {0} {1}")]
+    NoChunk(u8, u8),
+    #[error("Tried to modify a missing chunk at {0} {1}")]
+    TriedToModifyMissingChunk(u8, u8),
+    #[error("Tried to modify a chunk that hasn't been fully generated yet: {chunk:?} = {status}")]
+    NotFullyGenerated { chunk: (u8, u8), status: String },
+    #[error("Tried to update lighting on a DataVersion({data_version}) that is older than {min} in chunk {chunk:?}. Try disabling 'update_lighting' in the Region Config", min = Region::MIN_LIGHT_DATA_VERSION)]
+    UnsupportedLightUpdateVersion { chunk: (u8, u8), data_version: i32 },
+    #[error("Invalid palette index in data: {0}")]
+    InvalidPaletteIndex(i64),
+    #[error("No palette that matches {0:?}")]
+    NotInPalette(Block),
 }

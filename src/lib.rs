@@ -1,14 +1,14 @@
-// new and improved better, faster region
-pub mod region;
-// only block is really used here
-pub mod nbt;
+//! Easily set/get blocks to Minecraft regions
 
-// all of these are OLD
-pub mod config;
-pub mod coordinate;
-pub mod error;
-mod grouping;
-mod level;
-pub mod operation;
-mod split;
-pub mod world;
+mod config;
+mod error;
+mod get;
+mod nbt;
+mod region;
+mod set;
+mod write;
+
+pub use config::Config;
+pub use error::{Error, Result};
+pub use nbt::{Block, NbtConversion, NbtString};
+pub use region::{Region, get_empty_chunk};

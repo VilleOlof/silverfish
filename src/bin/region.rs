@@ -1,12 +1,15 @@
 use std::{fs::File, time::Instant};
 
-use rust_edit::{nbt::Block, region::Region};
+use rust_edit::{Block, Region};
 
 fn main() {
     let mut region = Region::full_empty((-1, 0));
     region.set_block(2, 80, 2, Block::new("beacon"));
     let write_instant = Instant::now();
-    region.write_blocks();
+    region
+        .write_blocks()
+        .inspect_err(|e| println!("{e}"))
+        .unwrap();
     println!("took {:?} to set block", write_instant.elapsed());
 
     // // full region write
@@ -20,7 +23,10 @@ fn main() {
     // }
     // println!("took {:?} to loop, writing...", loop_instant.elapsed());
     // let write_instant = Instant::now();
-    // region.write_blocks();
+    // region
+    //     .write_blocks()
+    //     .inspect_err(|e| println!("{e}"))
+    //     .unwrap();
     // println!(
     //     "took {:?} to set block, total: {:?}",
     //     write_instant.elapsed(),
@@ -28,8 +34,17 @@ fn main() {
     // );
 
     let get_instant = Instant::now();
-    println!("{:?}", region.get_block(2, 80, 2));
+    println!(
+        "{:?}",
+        region
+            .get_block(2, 80, 2)
+            .inspect_err(|e| println!("{e}"))
+            .unwrap()
+    );
     println!("took {:?} to get block", get_instant.elapsed());
 
-    region.write(&mut File::create("./r.-1.0.mca").unwrap());
+    region
+        .write(&mut File::create("./r.-1.0.mca").unwrap())
+        .inspect_err(|e| println!("{e}"))
+        .unwrap();
 }

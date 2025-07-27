@@ -1,29 +1,22 @@
-#[allow(unused_imports)] // used for doc
-use crate::world::World;
-use mca::CompressionType;
+//! `config` contains the [`Config`] used in [`crate::Region`].  
 
-/// Config for when flushing operations
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlushConfig {
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Creates new empty air-filled chunks when chunks are missing.  
+    ///
+    /// Look at [`get_empty_chunk`] for the initial data.  
+    pub create_chunk_if_missing: bool,
     /// If it should flag the chunks for Minecraft to re-calculate lighting when first loaded ingame  
     ///
-    /// See [`World::MIN_LIGHT_DATA_VERSION`] for minimum Minecraft version required for this flag.  
+    /// See [`Region::MIN_LIGHT_DATA_VERSION`] for minimum Minecraft version required for this flag.  
     pub update_lighting: bool,
-    /// The [`CompressionType`] to use when saving modified chunks.  
-    ///
-    /// Unmodified chunks will retain it's [`CompressionType`]
-    pub chunk_compression: CompressionType,
-
-    /// If the creating a new world, which does not have an input directory
-    pub in_memory: bool
 }
 
-impl Default for FlushConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
+            create_chunk_if_missing: false,
             update_lighting: true,
-            chunk_compression: CompressionType::Zlib,
-            in_memory: false
         }
     }
 }

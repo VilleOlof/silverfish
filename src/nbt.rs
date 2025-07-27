@@ -1,40 +1,20 @@
-use std::{collections::BTreeMap, fmt::Debug};
+//! `nbt` contains the [`Block`] struct used to set/get blocks and its associated functions and data.  
 
+use crate::error::{Error, Result};
 use simdnbt::{
     Mutf8Str, Mutf8String,
-    owned::{NbtCompound, NbtList, NbtTag},
+    owned::{NbtCompound, NbtTag},
 };
-
-use crate::error::RustEditError;
+use std::{collections::BTreeMap, fmt::Debug};
 
 pub trait NbtConversion {
-    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError>
+    fn from_compound(tag: &NbtCompound) -> Result<Self>
     where
         Self: Sized;
-    fn to_compound(self) -> Result<NbtCompound, RustEditError>;
+    fn to_compound(self) -> Result<NbtCompound>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Section {
-    pub sky_light: Option<Vec<u8>>,
-    pub block_light: Option<Vec<u8>>,
-    pub y: i8,
-    pub biomes: Biomes,
-    pub block_states: BlockStates,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Biomes {
-    pub data: Option<Vec<i64>>,
-    pub palette: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockStates {
-    pub data: Option<Vec<i64>>,
-    pub palette: Vec<Block>,
-}
-
+/// A Minecraft [Block](https://minecraft.wiki/w/Block), used when setting blocks or when retrieving blocks
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Block {
     pub name: NbtString,
@@ -68,135 +48,10 @@ impl NbtString {
     }
 }
 
-impl NbtConversion for Section {
-    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
-        let sky_light = tag.byte_array("SkyLight").map(|b| b.to_vec());
-        let block_light = tag.byte_array("BlockLight").map(|b| b.to_vec());
-        let y = tag
-            .byte("Y")
-            .ok_or(RustEditError::NbtError("Missing 'Y' in section".into()))?;
-        let biomes = tag.compound("biomes").ok_or(RustEditError::NbtError(
-            "Missing 'biomes' in section".into(),
-        ))?;
-        let biomes = Biomes::from_compound(&biomes)?;
-
-        let block_states = tag.compound("block_states").ok_or(RustEditError::NbtError(
-            "Missing 'block_states' in section".into(),
-        ))?;
-        let block_states = BlockStates::from_compound(&block_states)?;
-
-        Ok(Section {
-            sky_light,
-            block_light,
-            y,
-            biomes,
-            block_states,
-        })
-    }
-
-    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
-        let mut tag = NbtCompound::new();
-        if let Some(sky_light) = self.sky_light {
-            if !sky_light.is_empty() {
-                tag.insert("SkyLight", NbtTag::ByteArray(sky_light));
-            }
-        }
-        if let Some(block_light) = self.block_light {
-            if !block_light.is_empty() {
-                tag.insert("BlockLight", NbtTag::ByteArray(block_light));
-            }
-        }
-        tag.insert("Y", NbtTag::Byte(self.y));
-
-        tag.insert("biomes", self.biomes.to_compound()?);
-        tag.insert("block_states", self.block_states.to_compound()?);
-
-        Ok(tag)
-    }
-}
-
-impl NbtConversion for Biomes {
-    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
-        let data = tag.long_array("data").map(|d| d.to_vec());
-        let palette = tag.list("palette").ok_or(RustEditError::NbtError(
-            "Missing 'palette' in biomes".into(),
-        ))?;
-        // TODO simdnbt doesnt expose Mutf8String, only Mutf8Str which is a reference one
-        // Mutf8String also handles NBT specific string things so we would want that but uhh it doesnt expose it.
-        let palette: Vec<String> = palette
-            .strings()
-            .map(|s| s.iter().map(|m| m.to_str().to_string()).collect())
-            .ok_or(RustEditError::NbtError("Failed to get palette vec".into()))?;
-
-        Ok(Biomes { data, palette })
-    }
-
-    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
-        let mut tag = NbtCompound::new();
-        if let Some(data) = self.data {
-            // if palette len is 1, skip writing data
-            if self.palette.len() != 1 {
-                tag.insert("data", NbtTag::LongArray(data));
-            }
-        }
-        tag.insert(
-            "palette",
-            NbtTag::List(NbtList::String(
-                self.palette
-                    .iter()
-                    .map(|s| Mutf8Str::from_str(&s).into_owned())
-                    .collect(),
-            )),
-        );
-
-        Ok(tag)
-    }
-}
-
-impl NbtConversion for BlockStates {
-    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
-        let data = tag.long_array("data").map(|d| d.to_vec());
-
-        let palette = tag.list("palette").ok_or(RustEditError::NbtError(
-            "Missing 'palette' in biomes".into(),
-        ))?;
-        let palette: Vec<Block> = palette
-            .compounds()
-            .ok_or(RustEditError::NbtError(
-                "Invalid palette structure in block states".into(),
-            ))?
-            .iter()
-            .map(|p| Block::from_compound(p))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(BlockStates { data, palette })
-    }
-
-    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
-        let mut tag = NbtCompound::new();
-
-        if let Some(data) = self.data {
-            // if palette len is 1, skip writing data
-            if self.palette.len() != 1 {
-                tag.insert("data", NbtTag::LongArray(data));
-            }
-        }
-        let palette_nbt: Vec<NbtCompound> = self
-            .palette
-            .into_iter()
-            .map(|b| b.to_compound())
-            .collect::<Result<Vec<_>, _>>()?;
-        tag.insert("palette", NbtList::Compound(palette_nbt));
-
-        Ok(tag)
-    }
-}
-
 impl NbtConversion for Block {
-    fn from_compound(tag: &NbtCompound) -> Result<Self, RustEditError> {
-        let name = NbtString::from_mutf8str(tag.string("Name")).ok_or(RustEditError::NbtError(
-            "Missing 'name' in section palette".into(),
-        ))?;
+    fn from_compound(tag: &NbtCompound) -> Result<Self> {
+        let name =
+            NbtString::from_mutf8str(tag.string("Name")).ok_or(Error::MissingNbtTag("Name"))?;
 
         let properties = match tag.compound("Properties") {
             // skip calculating if empty
@@ -206,12 +61,10 @@ impl NbtConversion for Block {
 
                 for (k, v) in props.iter() {
                     new_properties.insert(
-                        NbtString::from_mutf8str(Some(k)).ok_or(RustEditError::NbtError(
-                            "Property key is not a string in section block palette".into(),
-                        ))?,
-                        NbtString::from_mutf8str(v.string()).ok_or(RustEditError::NbtError(
-                            "Property value is not a string in section block palette".into(),
-                        ))?,
+                        NbtString::from_mutf8str(Some(k))
+                            .ok_or(Error::InvalidNbtType("Properties > key"))?,
+                        NbtString::from_mutf8str(v.string())
+                            .ok_or(Error::InvalidNbtType("Properties > value"))?,
                     );
                 }
                 Some(new_properties)
@@ -222,7 +75,7 @@ impl NbtConversion for Block {
         Ok(Block { name, properties })
     }
 
-    fn to_compound(self) -> Result<NbtCompound, RustEditError> {
+    fn to_compound(self) -> Result<NbtCompound> {
         let mut tag = NbtCompound::new();
         tag.insert("Name", NbtTag::String(self.name.into()));
         if let Some(props) = self.properties {
@@ -237,29 +90,6 @@ impl NbtConversion for Block {
         }
 
         Ok(tag)
-    }
-}
-
-impl Section {
-    pub fn get_from_idx(sections: &NbtList, idx: isize) -> Result<Self, RustEditError> {
-        let compound_list = sections.compounds().ok_or(RustEditError::NbtError(
-            "Sections is the wrong list data type".into(),
-        ))?;
-
-        for c in compound_list {
-            let y = c
-                .byte("Y")
-                .ok_or(RustEditError::WorldError("Missing 'Y' in section".into()))?
-                as isize;
-            if y == idx {
-                let section = Section::from_compound(c)?;
-                return Ok(section);
-            }
-        }
-
-        Err(RustEditError::WorldError(
-            "no section found with a valid index".into(),
-        ))
     }
 }
 
@@ -341,5 +171,46 @@ impl Block {
                 (k, v)
             }))),
         }
+    }
+}
+
+/// A custom PartialEq implementation so we dont need to convert NbtCompound to Block  
+/// or Block to NbtCompound and can compare them fast
+impl PartialEq<&NbtCompound> for &Block {
+    fn eq(&self, other: &&NbtCompound) -> bool {
+        let name = match other.string("Name") {
+            Some(n) => n,
+            None => return false,
+        };
+        if self.name.to_mutf8str().to_str() != name.to_str() {
+            return false;
+        }
+
+        if let Some(block_props) = &self.properties {
+            let props = match other.compound("Properties") {
+                Some(props) => props,
+                None => return false,
+            };
+
+            let mut other_map: BTreeMap<NbtString, NbtString> = BTreeMap::new();
+
+            for (k, v) in props.iter() {
+                other_map.insert(
+                    // TODO cant really return result from PartialEq but maybe turn these into a default "false" ?
+                    NbtString::from_mutf8str(Some(&k)).unwrap(),
+                    NbtString::from_mutf8str(v.string()).unwrap(),
+                );
+            }
+
+            if &other_map != block_props {
+                return false;
+            }
+        } else {
+            if other.contains("Properties") {
+                return false;
+            }
+        }
+
+        true
     }
 }
