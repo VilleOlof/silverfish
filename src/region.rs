@@ -37,6 +37,7 @@ pub struct Region {
     pub(crate) seen_blocks: FixedBitSet,
 }
 
+/// Just a [`Block`] but with a set of coordinates attached to them.  
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockWithCoordinate {
     pub coordinates: (u32, i32, u32),
@@ -46,14 +47,16 @@ pub struct BlockWithCoordinate {
 impl Region {
     /// Whatever status the chunks needs to be to allow modification.  
     pub(crate) const REQUIRED_STATUS: &'static str = "minecraft:full";
-    /// the minimum dataversion that light updating works on.
-    /// since "isLightOn" was added in 1.18 (i think)
-    pub const MIN_LIGHT_DATA_VERSION: i32 = 2860;
+    /// the minimum dataversion that this crate works with.  
+    ///
+    /// This is due the massive structural changes in how the nbt is stored that was introduced in `21w39a` & `21w43a`
+    pub const MIN_DATA_VERSION: i32 = 2860;
 
     // some constants for the FixedBitSet & indexes
     pub(crate) const REGION_X_Z_WIDTH: usize = 512;
     pub(crate) const REGION_Y_MIN: isize = -64;
     pub(crate) const REGION_Y_MAX: isize = 320;
+    pub(crate) const REGION_CHUNK_SIZE: u8 = 32;
     pub(crate) const REGION_Y_WIDTH: usize = (Self::REGION_Y_MAX - Self::REGION_Y_MIN) as usize;
 
     /// Creates an empty [`Region`] with no chunks or anything.  
@@ -154,6 +157,22 @@ impl Region {
 
         Ok(())
     }
+
+    /// Returns the chunk nbt data found at the given chunk coordinates.  
+    ///
+    /// Do note that these chunk coordinates are local to within the region itself.  
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let chunk = region.get_chunk(5, 17)?;
+    /// ```
+    pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<&NbtCompound>> {
+        if x >= Self::REGION_CHUNK_SIZE || z >= Self::REGION_CHUNK_SIZE {
+            return Err(Error::ChunkOutOfRegionBounds(x, z));
+        }
+
+        Ok(self.chunks.get(&(x, z)))
+    }
 }
 
 impl Debug for Region {
@@ -191,7 +210,7 @@ pub(crate) fn get_bit_count(len: usize) -> u32 {
 
 /// Generates an empty chunk with plains as the default biome and air in all sections  
 ///
-/// DataVersion is defaulted to [`Region::MIN_LIGHT_DATA_VERSION`]
+/// DataVersion is defaulted to [`Region::MIN_DATA_VERSION`]
 pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompound {
     let mut sections: Vec<NbtCompound> = vec![];
 
@@ -220,10 +239,7 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
             "Status".into(),
             NbtTag::String(Region::REQUIRED_STATUS.into()),
         ),
-        (
-            "DataVersion".into(),
-            NbtTag::Int(Region::MIN_LIGHT_DATA_VERSION),
-        ),
+        ("DataVersion".into(), NbtTag::Int(Region::MIN_DATA_VERSION)),
         ("sections".into(), NbtTag::List(NbtList::Compound(sections))),
         ("block_entities".into(), NbtTag::List(NbtList::Empty)),
         ("isLightOn".into(), NbtTag::Byte(0)),

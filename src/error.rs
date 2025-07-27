@@ -19,6 +19,8 @@ pub enum Error {
         width = Region::REGION_X_Z_WIDTH
     )]
     CoordinatesOutOfRegionBounds(u32, u32),
+    #[error("Chunk coordinates are outside of region bounds ({0} || {1} >= 32")]
+    ChunkOutOfRegionBounds(u8, u8),
     #[error("No element at the given index: len is {len} but index is {index}")]
     OutOfBounds { len: usize, index: usize },
     #[error("Nbt value at '{0}' was the wrong nbt data type")]
@@ -35,8 +37,8 @@ pub enum Error {
     TriedToModifyMissingChunk(u8, u8),
     #[error("Tried to modify a chunk that hasn't been fully generated yet: {chunk:?} = {status}")]
     NotFullyGenerated { chunk: (u8, u8), status: String },
-    #[error("Tried to update lighting on a DataVersion({data_version}) that is older than {min} in chunk {chunk:?}. Try disabling 'update_lighting' in the Region Config", min = Region::MIN_LIGHT_DATA_VERSION)]
-    UnsupportedLightUpdateVersion { chunk: (u8, u8), data_version: i32 },
+    #[error("Tried to update a chunk with a DataVersion({data_version}) that is older than {min} in chunk {chunk:?}", min = Region::MIN_DATA_VERSION)]
+    UnsupportedVersion { chunk: (u8, u8), data_version: i32 },
     #[error("Invalid palette index in data: {0}")]
     InvalidPaletteIndex(i64),
     #[error("No palette that matches {0:?}")]

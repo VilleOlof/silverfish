@@ -59,12 +59,17 @@ impl Region {
             let data_version = chunk
                 .int("DataVersion")
                 .ok_or(Error::MissingNbtTag("DataVersion"))?;
-            if self.config.create_chunk_if_missing && data_version < Self::MIN_LIGHT_DATA_VERSION {
-                return Err(Error::UnsupportedLightUpdateVersion {
+            if data_version < Self::MIN_DATA_VERSION {
+                return Err(Error::UnsupportedVersion {
                     chunk: chunk_group.coordinate,
                     data_version,
                 });
             }
+
+            // clear heightmaps if they exist since they can become outdated after this
+            if let Some(height_maps) = chunk.compound_mut("Heightmaps") {
+                height_maps.clear();
+            };
 
             if self.config.update_lighting {
                 *chunk
