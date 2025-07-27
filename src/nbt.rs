@@ -15,17 +15,17 @@ pub struct NbtString(pub(crate) Vec<u8>);
 
 // impl partialeq for nbtstring and str/string
 
-impl PartialEq<str> for NbtString {
-    fn eq(&self, other: &str) -> bool {
+impl PartialEq<&str> for NbtString {
+    fn eq(&self, other: &&str) -> bool {
         let str = self.to_str();
-        str == other
+        &str == other
     }
 }
 
-impl PartialEq<NbtString> for str {
+impl PartialEq<NbtString> for &str {
     fn eq(&self, other: &NbtString) -> bool {
         let str = other.to_str();
-        str == self
+        &str == self
     }
 }
 
