@@ -55,3 +55,58 @@ impl Region {
         FixedBitSet::with_capacity(Self::BITSET_SIZE)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::Result;
+
+    #[test]
+    fn pre_set_block() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        region.set_block(1, 2, 3, Block::try_new("minecraft:red_stained_glass")?);
+
+        assert_eq!(region.pending_blocks.len(), 1);
+        assert_eq!(region.seen_blocks.count_ones(..), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn set_duplicate_block() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        region.set_block(52, -5, 395, Block::try_new("minecraft:red_stained_glass")?);
+        let success =
+            region.set_block(52, -5, 395, Block::try_new("minecraft:lime_stained_glass")?);
+
+        assert_eq!(success, None);
+        assert_eq!(region.pending_blocks.len(), 1);
+        assert_eq!(region.seen_blocks.count_ones(..), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn set_block() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        region.set_block(6, 52, 95, Block::try_new("minecraft:oak_planks")?);
+
+        assert_eq!(region.pending_blocks.len(), 1);
+        assert_eq!(region.seen_blocks.count_ones(..), 1);
+
+        region.write_blocks()?;
+
+        assert_eq!(
+            region.get_block(6, 52, 95)?,
+            Block::try_new("minecraft:oak_planks")?
+        );
+        assert_eq!(
+            region.get_block(52, 1, 5)?,
+            Block::try_new("minecraft:air")?
+        );
+        assert_eq!(region.pending_blocks.len(), 0);
+        assert_eq!(region.seen_blocks.count_ones(..), 0);
+
+        Ok(())
+    }
+}

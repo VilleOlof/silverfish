@@ -12,3 +12,6 @@ simdnbt = { version = "0.7.1", git = "https://github.com/azalea-rs/simdnbt", rev
 mca = "1.1.0"
 thiserror = "2"
 fixedbitset = "0.5.7"
+
+[lib]
+doctest = false

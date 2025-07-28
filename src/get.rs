@@ -146,3 +146,44 @@ fn group_coordinates_into_chunks(blocks: &[(u32, i32, u32)]) -> Vec<GetChunkGrou
 
     chunk_groups
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn get_block() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        region.set_block(5, 52, 17, Block::new("minecraft:crafter"));
+        region.write_blocks()?;
+        let block = region.get_block(5, 52, 17)?;
+        assert_eq!(block, Block::new("minecraft:crafter"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_blocks() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        region.set_block(82, 14, 92, Block::new("minecraft:lime_concrete"));
+        region.set_block(56, 192, 25, Block::new("minecraft:red_concrete"));
+        region.set_block(482, -52, 131, Block::new("minecraft:yellow_concrete"));
+        region.write_blocks()?;
+
+        let blocks = region.get_blocks(&[(82, 14, 92), (56, 192, 25), (482, -52, 131)])?;
+        assert_eq!(blocks.len(), 3);
+
+        let blocks = blocks.into_iter().map(|b| b.block).collect::<Vec<Block>>();
+        assert!(blocks.contains(&Block::new("minecraft:lime_concrete")));
+        assert!(blocks.contains(&Block::new("minecraft:red_concrete")));
+        assert!(blocks.contains(&Block::new("minecraft:yellow_concrete")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_get_coords() {
+        let region = Region::full_empty((0, 0));
+        assert!(region.get_block(852, 14, 5212).is_err())
+    }
+}

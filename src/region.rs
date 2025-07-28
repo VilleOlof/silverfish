@@ -267,3 +267,125 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
 pub fn to_region_local(coords: (i32, i32, i32)) -> (u32, i32, u32) {
     ((coords.0 & 511) as u32, coords.1, (coords.2 & 511) as u32)
 }
+
+#[cfg(test)]
+mod test {
+    use std::io::BufReader;
+
+    use super::*;
+
+    #[test]
+    fn same_region_local_coordinates() {
+        let coords = (52, -81, 381);
+        let local = to_region_local(coords);
+        assert_eq!((52, -81, 381), local);
+    }
+
+    #[test]
+    fn region_local_coordinates() {
+        let coords = (851, 85, -481);
+        let local = to_region_local(coords);
+        assert_eq!((339, 85, 31), local);
+    }
+
+    #[test]
+    fn empty_chunk() -> Result<()> {
+        let chunk = get_empty_chunk((15, 9), (2, -5));
+        let data_version = chunk
+            .int("DataVersion")
+            .ok_or(Error::MissingNbtTag("DataVersion"))?;
+        let x_pos = chunk.int("xPos").ok_or(Error::MissingNbtTag("xPos"))?;
+        let z_pos = chunk.int("zPos").ok_or(Error::MissingNbtTag("zPos"))?;
+        let sections = chunk
+            .list("sections")
+            .ok_or(Error::MissingNbtTag("sections"))?
+            .compounds()
+            .ok_or(Error::InvalidNbtList("!= compounds"))?;
+
+        assert_eq!(data_version, Region::MIN_DATA_VERSION);
+        assert_eq!(x_pos, 79);
+        assert_eq!(z_pos, -151);
+        assert_eq!(sections.len(), 24);
+
+        Ok(())
+    }
+
+    #[test]
+    fn data_bit_count() {
+        assert_eq!(get_bit_count(0), 4);
+        assert_eq!(get_bit_count(58), 6);
+        assert_eq!(get_bit_count(1754), 11);
+        assert_eq!(get_bit_count(8572728), 13);
+    }
+
+    #[test]
+    fn empty_region() {
+        let region = Region::empty((0, 0));
+        assert_eq!(region.chunks.len(), 0);
+        assert_eq!(region.pending_blocks.len(), 0);
+        assert_eq!(region.seen_blocks.count_ones(..), 0);
+        assert_eq!(region.region_coords, (0, 0));
+    }
+
+    #[test]
+    fn full_empty_region() {
+        let region = Region::full_empty((0, 0));
+        assert_eq!(region.chunks.len(), 1024);
+    }
+
+    #[test]
+    fn empty_from_nbt_region() {
+        let chunks = HashMap::new();
+        let region = Region::from_nbt(chunks, (0, 0));
+        assert_eq!(region.chunks.len(), 0);
+    }
+
+    #[test]
+    fn from_nbt_region() {
+        let mut chunks = HashMap::new();
+        chunks.insert((4, 8), get_empty_chunk((4, 8), (0, 0)));
+
+        let region = Region::from_nbt(chunks, (0, 0));
+        assert_eq!(region.chunks.len(), 1);
+        assert_eq!(region.pending_blocks.len(), 0);
+        assert_eq!(region.seen_blocks.count_ones(..), 0);
+        assert_eq!(region.region_coords, (0, 0));
+    }
+
+    const TEST_REGION: &[u8] = include_bytes!("../tests/full_region.mca");
+
+    #[test]
+    fn from_region_region() -> Result<()> {
+        let mut bytes = BufReader::new(TEST_REGION);
+        let region = Region::from_region(&mut bytes, (0, 0))?;
+        assert_eq!(region.chunks.len(), 1024);
+        Ok(())
+    }
+
+    const EMPTY_REGION: &[u8] = include_bytes!("../tests/empty_region.mca");
+
+    #[test]
+    fn write_region() -> Result<()> {
+        let mut bytes = BufReader::new(EMPTY_REGION);
+        let region = Region::from_region(&mut bytes, (0, 0))?;
+        let mut new_region_buf = vec![];
+        region.write(&mut new_region_buf)?;
+
+        assert_eq!(new_region_buf, EMPTY_REGION);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_chunk() -> Result<()> {
+        let mut chunks = HashMap::new();
+        chunks.insert((9, 1), get_empty_chunk((9, 1), (0, 0)));
+
+        let region = Region::from_nbt(chunks, (0, 0));
+
+        assert!(region.get_chunk(9, 1)?.is_some());
+        assert!(region.get_chunk(1, 9)?.is_none());
+
+        Ok(())
+    }
+}

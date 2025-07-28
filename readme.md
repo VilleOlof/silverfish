@@ -90,6 +90,8 @@ let config = Config {
 region.config = config;
 ```
 
+----
+
 Do note that all of these coordinates used above is local to the **region** *(x=0..512, z=0..512)*.  
 To transform normal *global* world coordinates to local region coordinates.  
 You can pass them through `rust_edit::to_region_local`.  
