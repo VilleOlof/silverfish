@@ -3,6 +3,7 @@
 //! Contains functions for constructing a [`Region`] and writing itself to a specified buffer.  
 
 use crate::{
+    biome::BiomeCellWithId,
     config::Config,
     error::{Error, Result},
     nbt::Block,
@@ -14,6 +15,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     io::{Cursor, Read, Write},
+    ops::{Deref, RangeInclusive},
 };
 
 // so ive tested filling an entire region with 1 single block
@@ -35,6 +37,11 @@ pub struct Region {
     pub(crate) pending_blocks: Vec<BlockWithCoordinate>,
     /// blocks we've already pushed to `pending_blocks` to avoid duplicate coordinate blocks
     pub(crate) seen_blocks: FixedBitSet,
+
+    /// buffered biomes that is about to be written to `chunks`
+    pub(crate) pending_biomes: Vec<BiomeCellWithId>,
+    /// biomes we've already pushed to `pending_biomes` to avoid duplicate biome cells
+    pub(crate) seen_biomes: FixedBitSet,
 }
 
 /// Just a [`Block`] but with a set of coordinates attached to them.  
@@ -59,20 +66,44 @@ impl Region {
     pub(crate) const REGION_CHUNK_SIZE: u8 = 32;
     pub(crate) const REGION_Y_WIDTH: usize = (Self::REGION_Y_MAX - Self::REGION_Y_MIN) as usize;
 
+    /// Updates the world height in the [`Config`].  
+    ///
+    /// #### Why is `world_height` private in [`Config`] and only mutated through [`Region`] ?
+    /// Well, when a region is first constructed it defaults an internal bitset to a certain size.  
+    /// for performance reasons, and if you update world_height, we also need to re-init that bitset.
+    /// *(this function also clears all internal buffers related to biomes)*.
+    /// and a config can only be mutated on a region after the consumer has gotten it.  
+    /// So when you get a region, it always defaults to Minecrafts vanilla range of world_height.  
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let mut region = Region::full_empty((0, 0));
+    /// region.set_world_height(128..=320);
+    /// ```
+    pub fn set_world_height(&mut self, range: RangeInclusive<isize>) {
+        self.seen_biomes = Self::get_default_biome_bitset(range.clone());
+        self.pending_biomes = vec![]; // need to reset because we reset bitset
+        self.config.world_height = range;
+    }
+
     /// Creates an empty [`Region`] with no chunks or anything.  
     ///
     /// [`Config::create_chunk_if_missing`] will set to `true` from this  
     #[inline(always)]
     pub fn empty(region_coords: (i32, i32)) -> Self {
+        let config = Config {
+            create_chunk_if_missing: true,
+            ..Default::default()
+        };
+
         Self {
             chunks: HashMap::new(),
+            seen_blocks: Self::get_default_block_bitset(),
+            seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
             pending_blocks: vec![],
-            seen_blocks: Self::get_default_bitset(),
+            pending_biomes: vec![],
             region_coords,
-            config: Config {
-                create_chunk_if_missing: true,
-                ..Default::default()
-            },
+            config,
         }
     }
 
@@ -93,12 +124,16 @@ impl Region {
     /// Creates a new [`Region`] with chunks from `chunks`
     #[inline(always)]
     pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>, region_coords: (i32, i32)) -> Self {
+        let config = Config::default();
+
         Self {
             chunks,
+            seen_blocks: Self::get_default_block_bitset(),
+            seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
             pending_blocks: vec![],
-            seen_blocks: Self::get_default_bitset(),
-            config: Config::default(),
+            pending_biomes: vec![],
             region_coords,
+            config,
         }
     }
 
@@ -266,6 +301,60 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
 /// ```
 pub fn to_region_local(coords: (i32, i32, i32)) -> (u32, i32, u32) {
     ((coords.0 & 511) as u32, coords.1, (coords.2 & 511) as u32)
+}
+
+/// Checks the data_version and status of the chunk if it's valid to operate on
+pub(crate) fn is_valid_chunk(chunk: &NbtCompound, coordinate: (u8, u8)) -> Result<()> {
+    let status = chunk
+        .string("Status")
+        .ok_or(Error::MissingNbtTag("Status"))?
+        .to_str();
+    if status != Region::REQUIRED_STATUS {
+        return Err(Error::NotFullyGenerated {
+            chunk: coordinate,
+            status: status.into_owned(),
+        });
+    }
+
+    let data_version = chunk
+        .int("DataVersion")
+        .ok_or(Error::MissingNbtTag("DataVersion"))?;
+    if data_version < Region::MIN_DATA_VERSION {
+        return Err(Error::UnsupportedVersion {
+            chunk: coordinate,
+            data_version,
+        });
+    }
+
+    Ok(())
+}
+
+/// Removes unused elements from the palette and "cleans" it.  
+pub(crate) fn clean_palette<T>(data: &mut Vec<i64>, palette: &mut Vec<T>) {
+    let mut palette_count: Vec<i32> = vec![0; palette.len()];
+    for index in data.deref() {
+        palette_count[*index as usize] += 1;
+    }
+
+    let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
+
+    let mut len = palette.len();
+    let mut i = len as i32 - 1;
+    while i >= 0 {
+        if palette_count[i as usize] == 0 {
+            palette.remove(i as usize);
+            len -= 1;
+
+            for j in (i as usize)..palette_count.len() {
+                palette_offsets[j as usize] += 1;
+            }
+        }
+        i -= 1;
+    }
+
+    for block in 0..data.len() {
+        data[block] -= palette_offsets[data[block] as usize];
+    }
 }
 
 #[cfg(test)]

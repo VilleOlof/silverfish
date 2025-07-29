@@ -2,13 +2,17 @@
 //! to it's chunks within the [`Region`], handles batching, encoding/decoding section data, etc.  
 
 use crate::{
-    Block, Error, Region, Result, get_empty_chunk,
-    region::{BlockWithCoordinate, get_bit_count},
+    Block, Error, Region, Result,
+    data::{decode_data, encode_data},
+    get_empty_chunk,
+    region::{BlockWithCoordinate, clean_palette, get_bit_count, is_valid_chunk},
 };
-use simdnbt::owned::{NbtCompound, NbtList, NbtTag};
+use simdnbt::owned::{NbtCompound, NbtList};
 use std::collections::HashMap;
 
 impl Region {
+    pub(crate) const BLOCK_DATA_LEN: usize = 4096;
+
     /// Takes all pending block writes and applies all the blocks to the actual chunk NBT
     ///
     /// Clears the internal buffered blocks instantly.  
@@ -17,7 +21,7 @@ impl Region {
         let pending_blocks = std::mem::take(&mut self.pending_blocks);
         let mut groups = group_blocks_into_chunks(pending_blocks);
         // reset seen_blocks already here since we swapped pending_blocks with default
-        self.seen_blocks = Self::get_default_bitset();
+        self.seen_blocks.clear();
 
         // theres probably some way to convert this into a rayon par_iter or something
         // so this can be heavily faster, the only annoying thing is since this is all mutable reference to self.chunks
@@ -45,26 +49,7 @@ impl Region {
                 }
             };
 
-            let status = chunk
-                .string("Status")
-                .ok_or(Error::MissingNbtTag("Status"))?
-                .to_str();
-            if status != Self::REQUIRED_STATUS {
-                return Err(Error::NotFullyGenerated {
-                    chunk: chunk_group.coordinate,
-                    status: status.into_owned(),
-                });
-            }
-
-            let data_version = chunk
-                .int("DataVersion")
-                .ok_or(Error::MissingNbtTag("DataVersion"))?;
-            if data_version < Self::MIN_DATA_VERSION {
-                return Err(Error::UnsupportedVersion {
-                    chunk: chunk_group.coordinate,
-                    data_version,
-                });
-            }
+            is_valid_chunk(&chunk, chunk_group.coordinate)?;
 
             // clear heightmaps if they exist since they can become outdated after this
             if let Some(height_maps) = chunk.compound_mut("Heightmaps") {
@@ -138,31 +123,8 @@ impl Region {
                 };
                 let data = unsafe { (*state_ptr).long_array("data") };
 
-                // if no data found we directly skip to a pre-defined zeroed vec
-                let mut old_indexes = match data {
-                    Some(data) => {
-                        let mut old_indexes: Vec<i64> = Vec::with_capacity(4096);
-
-                        let bit_count: u32 = get_bit_count(palette.len());
-                        let mut offset: u32 = 0;
-
-                        let mask = (1 << bit_count) - 1;
-                        for data_block in data.iter() {
-                            while (offset * bit_count) + bit_count <= 64 {
-                                let block = (data_block >> (offset * bit_count)) & mask;
-
-                                old_indexes.push(block);
-
-                                offset += 1
-                            }
-                            offset = 0;
-                        }
-                        old_indexes.truncate(4096);
-
-                        old_indexes
-                    }
-                    None => vec![0; 4096],
-                };
+                let mut old_indexes =
+                    decode_data(Region::BLOCK_DATA_LEN, get_bit_count(palette.len()), data);
 
                 // this *should* check for bad files
                 for idx in old_indexes.iter_mut() {
@@ -186,7 +148,7 @@ impl Region {
                             let palette_index = palette
                                 .iter()
                                 .position(|c| &block.block == c)
-                                .ok_or(Error::NotInPalette(block.block.clone()))?
+                                .ok_or(Error::NotInBlockPalette(block.block.clone()))?
                                 as i64;
                             cached_palette_indexes.insert(&block.block, palette_index);
                             palette_index
@@ -209,31 +171,7 @@ impl Region {
                     };
                 }
 
-                // construct data/palette
-                let mut palette_count: Vec<i32> = vec![0; palette.len()];
-                for index in &old_indexes {
-                    palette_count[*index as usize] += 1;
-                }
-
-                let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
-
-                let mut len = palette.len();
-                let mut i = len as i32 - 1;
-                while i >= 0 {
-                    if palette_count[i as usize] == 0 {
-                        palette.remove(i as usize);
-                        len -= 1;
-
-                        for j in (i as usize)..palette_count.len() {
-                            palette_offsets[j as usize] += 1;
-                        }
-                    }
-                    i -= 1;
-                }
-
-                for block in 0..old_indexes.len() {
-                    old_indexes[block] -= palette_offsets[old_indexes[block] as usize];
-                }
+                clean_palette(&mut old_indexes, palette);
 
                 // remove any marked block entities
                 block_entities.retain(|be| {
@@ -253,33 +191,12 @@ impl Region {
                     continue;
                 }
 
-                let mut new_blockdata: Vec<i64> = Vec::with_capacity(4096);
-                let bit_count: u32 = get_bit_count(palette.len());
-
-                let mut offset = 0;
-                let mut currrent_long: i64 = 0;
-                for block in old_indexes.iter() {
-                    currrent_long |= block << (offset * bit_count);
-                    offset += 1;
-
-                    if (offset * bit_count) + bit_count > 64 {
-                        new_blockdata.push(currrent_long);
-                        currrent_long = 0;
-                        offset = 0;
-                    }
-                }
-
-                if offset > 0 {
-                    new_blockdata.push(currrent_long);
-                }
-
-                // store back the data, state is &mut to section
-                if !state.contains("data") {
-                    state.insert("data", NbtTag::LongArray(new_blockdata));
-                } else {
-                    // this unwrap is 100% to exist due to the above check
-                    *state.long_array_mut("data").unwrap() = new_blockdata;
-                }
+                encode_data(
+                    Region::BLOCK_DATA_LEN,
+                    get_bit_count(palette.len()),
+                    old_indexes,
+                    state,
+                );
             }
         }
 

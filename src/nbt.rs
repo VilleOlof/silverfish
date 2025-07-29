@@ -298,6 +298,27 @@ impl PartialEq<NbtString> for String {
     }
 }
 
+impl PartialEq<NbtString> for Mutf8String {
+    fn eq(&self, other: &NbtString) -> bool {
+        let str = other.to_mutf8str();
+        self.as_str() == str
+    }
+}
+
+impl PartialEq<NbtString> for &Mutf8String {
+    fn eq(&self, other: &NbtString) -> bool {
+        let str = other.to_mutf8str();
+        self.as_str() == str
+    }
+}
+
+impl PartialEq<NbtString> for &Mutf8Str {
+    fn eq(&self, other: &NbtString) -> bool {
+        let str = other.to_mutf8str();
+        self == &str
+    }
+}
+
 impl Into<Mutf8String> for NbtString {
     fn into(self) -> Mutf8String {
         Self::to_mutf8string(self)
@@ -307,6 +328,25 @@ impl Into<Mutf8String> for NbtString {
 impl Into<NbtString> for &str {
     fn into(self) -> NbtString {
         NbtString::from_str(&self).expect("Failed to convert str to NbtString")
+    }
+}
+
+impl Into<NbtString> for String {
+    fn into(self) -> NbtString {
+        NbtString::from_str(&self).expect("Failed to convert string to NbtString")
+    }
+}
+
+impl Into<NbtString> for &Mutf8Str {
+    fn into(self) -> NbtString {
+        NbtString::from_mutf8str(Some(self)).expect("Failed to convert mutf8str to NbtString")
+    }
+}
+
+impl Into<NbtString> for Mutf8String {
+    fn into(self) -> NbtString {
+        NbtString::from_mutf8str(Some(self.as_str()))
+            .expect("Failed to convert mutf8string to NbtString")
     }
 }
 

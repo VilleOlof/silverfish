@@ -14,6 +14,7 @@ fn main() {
 
     // // full region write
     // let loop_instant = Instant::now();
+    // region.allocate_block_buffer(4096);
     // for x in 0..512 {
     //     for y in -64i32..320i32 {
     //         for z in 0..512 {

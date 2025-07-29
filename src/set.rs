@@ -23,7 +23,7 @@ impl Region {
     /// ```no_run
     /// let _ = region.set_block(5, 97, 385, Block::new("dirt"));
     /// // and to actually write the changes to the NBT
-    /// region.write_blocks();
+    /// region.write_blocks()?;
     /// ```
     #[inline(always)]
     pub fn set_block(&mut self, x: u32, y: i32, z: u32, block: Block) -> Option<()> {
@@ -40,6 +40,17 @@ impl Region {
         None
     }
 
+    /// Allocates a new [`Vec`] with `size` as it's capacity.  
+    ///
+    /// Overwrites the already existing internal block buffer.  
+    ///
+    /// Useful if you know exactly how many blocks you will push
+    /// to the internal buffer to avoid re-allocations.  
+    pub fn allocate_block_buffer(&mut self, size: usize) {
+        self.pending_blocks = Vec::with_capacity(size);
+        self.seen_blocks.clear();
+    }
+
     /// Returns the index for a block in the [`Self::seen_blocks`] bitset based of it's coordinates  
     #[inline(always)]
     pub(crate) fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
@@ -51,7 +62,7 @@ impl Region {
 
     /// Returns a [`FixedBitSet`] with a default capacity that holds an entire regions blocks for check  
     #[inline(always)]
-    pub(crate) fn get_default_bitset() -> FixedBitSet {
+    pub(crate) fn get_default_block_bitset() -> FixedBitSet {
         FixedBitSet::with_capacity(Self::BITSET_SIZE)
     }
 }

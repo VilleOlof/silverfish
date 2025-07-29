@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::{
     Block, Error, Region, Result,
+    data::decode_data,
     region::{BlockWithCoordinate, get_bit_count},
 };
 
@@ -60,32 +61,15 @@ impl Region {
                     .compound("block_states")
                     .ok_or(Error::MissingNbtTag("block_states"))?;
 
-                let data = state
-                    .long_array("data")
-                    .map(|d| d.to_vec())
-                    .unwrap_or(vec![0; 4096]);
+                let data = state.long_array("data");
                 let palette = state
                     .list("palette")
                     .ok_or(Error::MissingNbtTag("palette"))?
                     .compounds()
                     .ok_or(Error::InvalidNbtType("palette"))?;
 
-                let bit_count: u32 = get_bit_count(palette.len());
-
-                let mut indexes: Vec<i64> = Vec::with_capacity(4096);
-
-                let mut offset: u32 = 0;
-                let mask = (1 << bit_count) - 1;
-                for data_block in data.iter() {
-                    while (offset * bit_count) + bit_count <= 64 {
-                        let block = (data_block >> (offset * bit_count)) & mask;
-
-                        indexes.push(block);
-
-                        offset += 1
-                    }
-                    offset = 0;
-                }
+                let indexes =
+                    decode_data(Region::BLOCK_DATA_LEN, get_bit_count(palette.len()), data);
 
                 for (x, y, z) in blocks_to_get {
                     let index = (x & 15) + ((z & 15) * 16) + ((y & 15) as u32 * 16 * 16);

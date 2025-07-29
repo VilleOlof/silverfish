@@ -1,6 +1,6 @@
 //! `error` contains the [`Error`] type for this crate and a shorthand [`Result`] type.  
 
-use crate::{nbt::Block, region::Region};
+use crate::{NbtString, nbt::Block, region::Region};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -42,5 +42,7 @@ pub enum Error {
     #[error("Invalid palette index in data: {0}")]
     InvalidPaletteIndex(i64),
     #[error("No palette that matches {0:?}")]
-    NotInPalette(Block),
+    NotInBlockPalette(Block),
+    #[error("No palette that matches {0:?}")]
+    NotInBiomePalette(NbtString),
 }
