@@ -357,6 +357,8 @@ impl Region {
 
 #[cfg(test)]
 mod test {
+    use std::time::Instant;
+
     use crate::Name;
 
     use super::*;
@@ -374,6 +376,30 @@ mod test {
             beacon,
             Block::try_new(Name::new_namespace("minecraft:beacon"))?
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn full_region_set_section() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        let mut sections = Vec::with_capacity(24_576);
+        let block = Block::try_new(Name::new_namespace("minecraft:water"))?;
+
+        for x in 0..32 {
+            for y in -4..20 {
+                for z in 0..32 {
+                    sections.push(((x, z), y, block.clone()));
+                }
+            }
+        }
+
+        let instant = Instant::now();
+        region.set_sections(sections)?;
+        println!("filling region took: {:?}", instant.elapsed());
+
+        let sample = region.get_block(483, 281, 313)?;
+        assert_eq!(sample, block);
 
         Ok(())
     }
