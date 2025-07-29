@@ -1,10 +1,13 @@
 [package]
 name = "rust-edit"
 description = "Easily edit Minecraft worlds with a simple, fast and powerful API"
-license = "MIT"
 version = "0.1.0"
 edition = "2024"
 authors = ["ReeZey", "VilleOlof"]
+categories = ["parser-implementations", "game-development"]
+keywords = ["minecraft", "nbt", "chunk", "edit", "block"]
+readme = "readme.md"
+license = "MIT"
 repository = "https://github.com/VilleOlof/rust-edit"
 
 [dependencies]
