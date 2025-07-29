@@ -81,7 +81,7 @@ impl Region {
                 {
                     NbtList::Compound(c) => c,
                     NbtList::Empty => &mut vec![],
-                    _ => return Err(Error::InvalidNbtList("sections")),
+                    _ => return Err(Error::InvalidNbtList("block_entities")),
                 }
             };
             // a little cache so we can find the index directly and remove it instead of looking up the coords everytime
@@ -203,6 +203,177 @@ impl Region {
         }
 
         self.pending_blocks.clear();
+
+        Ok(())
+    }
+
+    /// Set a single section (16\*16\*16) to a single [`Block`].  
+    ///
+    /// Writes the changes directly to the NBT.  
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let mut region = Region::full_empty((0, 0));
+    /// region.set_section((13, 15), 1, "minecraft:stone")?;
+    /// ```
+    pub fn set_section<B: Into<Block>>(
+        &mut self,
+        chunk: (u8, u8),
+        section: i8,
+        block: B,
+    ) -> Result<()> {
+        Ok(self.set_sections(vec![(chunk, section, block)])?)
+    }
+
+    /// Set an entire section (16\*16\*16) to one single [`Block`].  
+    ///
+    /// Useful if you want to mass set a big area to one single block.
+    ///
+    /// Writes the changes directly to the NBT.  
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let mut region = Region::full_empty((0, 0));
+    /// region.set_sections(vec![((5, 12), 6, "dirt"), ((14, 5), -1, "stone")])?;
+    /// ```
+    pub fn set_sections<B: Into<Block>>(&mut self, sections: Vec<((u8, u8), i8, B)>) -> Result<()> {
+        for (chunk_coords, section_y, block) in sections {
+            assert!(chunk_coords.0 < 32 && chunk_coords.1 < 32);
+
+            // again, this part is just copied but hard to extrapolate
+            let chunk = match self.chunks.get_mut(&chunk_coords) {
+                Some(chunk) => chunk,
+                None if self.config.create_chunk_if_missing => {
+                    self.chunks.insert(
+                        chunk_coords,
+                        get_empty_chunk(chunk_coords, self.region_coords),
+                    );
+                    self.chunks
+                        .get_mut(&chunk_coords)
+                        .ok_or(Error::NoChunk(chunk_coords.0, chunk_coords.1))?
+                }
+                None => {
+                    return Err(Error::TriedToModifyMissingChunk(
+                        chunk_coords.0,
+                        chunk_coords.1,
+                    ));
+                }
+            };
+
+            is_valid_chunk(&chunk, chunk_coords)?;
+
+            // clear heightmaps if they exist since they can become outdated after this
+            if let Some(height_maps) = chunk.compound_mut("Heightmaps") {
+                height_maps.clear();
+            };
+
+            if self.config.update_lighting {
+                *chunk
+                    .byte_mut("isLightOn")
+                    .ok_or(Error::MissingNbtTag("isLightOn"))? = 0;
+            }
+
+            let chunk_ptr = chunk as *mut NbtCompound;
+            let sections: &mut Vec<NbtCompound> = unsafe {
+                match (*chunk_ptr)
+                    .list_mut("sections")
+                    .ok_or(Error::MissingNbtTag("sections"))?
+                {
+                    NbtList::Compound(c) => c,
+                    _ => return Err(Error::InvalidNbtList("sections")),
+                }
+            };
+
+            let block_entities: &mut Vec<NbtCompound> = unsafe {
+                match (*chunk_ptr)
+                    .list_mut("block_entities")
+                    .ok_or(Error::MissingNbtTag("block_entities"))?
+                {
+                    NbtList::Compound(c) => c,
+                    NbtList::Empty => &mut vec![],
+                    _ => return Err(Error::InvalidNbtList("block_entities")),
+                }
+            };
+
+            let section = sections
+                .iter_mut()
+                .try_find(|s| {
+                    Ok::<bool, Error>(s.byte("Y").ok_or(Error::MissingNbtTag("Y"))? == section_y)
+                })?
+                .ok_or(Error::MissingNbtTag("couldn't find section"))?;
+
+            if self.config.update_lighting {
+                section.remove("BlockLight");
+                section.remove("SkyLight");
+            }
+
+            let state = section
+                .compound_mut("block_states")
+                .ok_or(Error::MissingNbtTag("block_states"))?;
+
+            // when setting a single section, remove its data field and make sure
+            // the palette only has a single block inside it
+            state.remove("data");
+            let palette = match state.list_mut("palette").unwrap() {
+                NbtList::Compound(c) => c,
+                _ => return Err(Error::InvalidNbtList("palette")),
+            };
+
+            palette.clear();
+            let block: Block = block.into();
+            palette.push(block.to_compound()?);
+
+            assert_eq!(palette.len(), 1);
+
+            // TODO most block entity things doesnt have tests for them
+            // and im unsure if this actually works since i suck at math :)
+            for i in 0..block_entities.len() {
+                let x = block_entities[i]
+                    .int("x")
+                    .ok_or(Error::MissingNbtTag("x"))?
+                    & 15;
+                let y = block_entities[i]
+                    .int("y")
+                    .ok_or(Error::MissingNbtTag("y"))?
+                    & 15;
+                let z = block_entities[i]
+                    .int("z")
+                    .ok_or(Error::MissingNbtTag("z"))?
+                    & 15;
+
+                // check if x y z is within
+                if (chunk_coords.0..chunk_coords.0 + 16).contains(&(x as u8))
+                    || ((section_y * 16)..(section_y * 16) + 16).contains(&(y as i8))
+                    || (chunk_coords.1..chunk_coords.1 + 16).contains(&(z as u8))
+                {
+                    block_entities.remove(i);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::Name;
+
+    use super::*;
+
+    #[test]
+    fn set_section() -> Result<()> {
+        let mut region = Region::full_empty((0, 0));
+        region.set_section(
+            (0, 0),
+            2,
+            Block::try_new(Name::new_namespace("minecraft:beacon"))?,
+        )?;
+        let beacon = region.get_block(5, 35, 11)?;
+        assert_eq!(
+            beacon,
+            Block::try_new(Name::new_namespace("minecraft:beacon"))?
+        );
 
         Ok(())
     }

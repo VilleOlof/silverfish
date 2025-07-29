@@ -1,5 +1,6 @@
 #![doc = include_str!("../readme.md")]
 #![feature(str_as_str)]
+#![feature(try_find)]
 
 mod biome;
 mod config;
