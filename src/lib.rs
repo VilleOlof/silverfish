@@ -7,6 +7,7 @@ mod data;
 mod error;
 mod get;
 mod nbt;
+mod nbt_impls;
 mod region;
 mod set;
 mod write;

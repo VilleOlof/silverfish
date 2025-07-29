@@ -5,13 +5,33 @@ use simdnbt::{
     Mutf8Str, Mutf8String,
     owned::{NbtCompound, NbtTag},
 };
-use std::{borrow::Cow, collections::BTreeMap, fmt::Debug, hash::Hash};
+use std::{borrow::Cow, collections::BTreeMap, hash::Hash};
+
+/// A Minecraft [Block](https://minecraft.wiki/w/Block), used when setting blocks or when retrieving blocks
+#[derive(Clone, PartialEq, Eq)]
+pub struct Block {
+    pub name: Name,
+    pub properties: Option<BTreeMap<NbtString, NbtString>>,
+}
 
 /// A [`Mutf8String`] in disguise. (See it for more info on this string type)
 ///
 /// Wrapper for it since [`Mutf8String`] doesn't implement [`Hash`].  
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NbtString(pub(crate) Vec<u8>);
+
+/// A block name, an enum to decide if it contains a namespace or not.  
+///
+/// If you know that your blocks already contain a namespace, you can safetely construct a [`Name::Namespaced`].  
+///
+/// Otherwise if you don't know, construct a [`Name::Id`] and  
+/// let it auto-translate it to a namespaced on if it doesn't already contain a namespace
+/// The to namespace translation only happens once the name is actually writtent to NBT.  
+#[derive(Clone, Eq, Hash)]
+pub enum Name {
+    Namespaced(NbtString),
+    Id(NbtString),
+}
 
 impl NbtString {
     pub fn from_mutf8str(string: Option<&Mutf8Str>) -> Option<Self> {
@@ -47,13 +67,6 @@ impl NbtString {
     pub fn inner(&self) -> &Vec<u8> {
         &self.0
     }
-}
-
-/// A Minecraft [Block](https://minecraft.wiki/w/Block), used when setting blocks or when retrieving blocks
-#[derive(Clone, PartialEq, Eq)]
-pub struct Block {
-    pub name: Name,
-    pub properties: Option<BTreeMap<NbtString, NbtString>>,
 }
 
 impl Block {
@@ -130,6 +143,14 @@ impl Block {
     ///
     /// Defaults to `minecraft:<id>`
     pub(crate) fn populate_namespace(id: &str) -> Cow<'_, str> {
+        // we first check if its just a minecraft namespace since its :
+        // is on the 9th index and we can easily skip any further iterations.
+        if let Some(maybe_colon) = id.chars().nth(9) {
+            if maybe_colon == ':' {
+                return Cow::Borrowed(id);
+            }
+        }
+
         if !id.contains(":") {
             Cow::Owned(String::from("minecraft:") + &id)
         } else {
@@ -188,204 +209,6 @@ impl Block {
 
         Ok(tag)
     }
-}
-
-impl Debug for Block {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // writes it in format of "<id>" if only id
-        // if props, then <id>[<key> = <value>, <key> = <value>, ...]
-        // a bit like how minecraft stores the block in snbt but its not snbt
-        write!(
-            f,
-            "{}{}",
-            self.name.to_str(),
-            if let Some(props) = &self.properties {
-                format!(
-                    "[{}]",
-                    props
-                        .iter()
-                        .map(|(k, v)| format!(
-                            "{}={}",
-                            k.to_mutf8str().to_str(),
-                            v.to_mutf8str().to_str()
-                        ))
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                )
-            } else {
-                "".to_owned()
-            }
-        )
-    }
-}
-
-impl Into<Block> for &str {
-    fn into(self) -> Block {
-        Block::new(self)
-    }
-}
-
-impl Into<Block> for String {
-    fn into(self) -> Block {
-        Block::new(self)
-    }
-}
-
-impl Hash for Block {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write(&self.name.as_nbt_string().0);
-        if let Some(props) = &self.properties {
-            for (k, v) in props {
-                state.write(&k.0);
-                state.write(&v.0);
-            }
-        }
-    }
-}
-
-/// A custom PartialEq implementation so we dont need to convert NbtCompound to Block  
-/// or Block to NbtCompound and can compare them fast
-impl PartialEq<&NbtCompound> for &Block {
-    fn eq(&self, other: &&NbtCompound) -> bool {
-        let name = match other.string("Name") {
-            Some(n) => n,
-            None => return false,
-        };
-        if self.name.into_cow_namespaced().to_mutf8str() != name {
-            return false;
-        }
-
-        if let Some(block_props) = &self.properties {
-            let props = match other.compound("Properties") {
-                Some(props) => props,
-                None => return false,
-            };
-
-            let mut other_map: BTreeMap<NbtString, NbtString> = BTreeMap::new();
-
-            for (k, v) in props.iter() {
-                let k = match NbtString::from_mutf8str(Some(&k)) {
-                    Some(k) => k,
-                    None => return false,
-                };
-                let v = match NbtString::from_mutf8str(v.string()) {
-                    Some(v) => v,
-                    None => return false,
-                };
-
-                other_map.insert(k, v);
-            }
-
-            if &other_map != block_props {
-                return false;
-            }
-        } else {
-            if other.contains("Properties") {
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
-impl Debug for NbtString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_str())
-    }
-}
-
-impl PartialEq<&str> for NbtString {
-    fn eq(&self, other: &&str) -> bool {
-        let str = self.to_str();
-        &str == other
-    }
-}
-
-impl PartialEq<NbtString> for &str {
-    fn eq(&self, other: &NbtString) -> bool {
-        let str = other.to_str();
-        &str == self
-    }
-}
-
-impl PartialEq<String> for NbtString {
-    fn eq(&self, other: &String) -> bool {
-        let str = self.to_str();
-        str == other.as_str()
-    }
-}
-
-impl PartialEq<NbtString> for String {
-    fn eq(&self, other: &NbtString) -> bool {
-        let str = other.to_str();
-        self.as_str() == str
-    }
-}
-
-impl PartialEq<NbtString> for Mutf8String {
-    fn eq(&self, other: &NbtString) -> bool {
-        let str = other.to_mutf8str();
-        self.as_str() == str
-    }
-}
-
-impl PartialEq<NbtString> for &Mutf8String {
-    fn eq(&self, other: &NbtString) -> bool {
-        let str = other.to_mutf8str();
-        self.as_str() == str
-    }
-}
-
-impl PartialEq<NbtString> for &Mutf8Str {
-    fn eq(&self, other: &NbtString) -> bool {
-        let str = other.to_mutf8str();
-        self == &str
-    }
-}
-
-impl Into<Mutf8String> for NbtString {
-    fn into(self) -> Mutf8String {
-        Self::to_mutf8string(self)
-    }
-}
-
-impl Into<NbtString> for &str {
-    fn into(self) -> NbtString {
-        NbtString::from_str(&self).expect("Failed to convert str to NbtString")
-    }
-}
-
-impl Into<NbtString> for String {
-    fn into(self) -> NbtString {
-        NbtString::from_str(&self).expect("Failed to convert string to NbtString")
-    }
-}
-
-impl Into<NbtString> for &Mutf8Str {
-    fn into(self) -> NbtString {
-        NbtString::from_mutf8str(Some(self)).expect("Failed to convert mutf8str to NbtString")
-    }
-}
-
-impl Into<NbtString> for Mutf8String {
-    fn into(self) -> NbtString {
-        NbtString::from_mutf8str(Some(self.as_str()))
-            .expect("Failed to convert mutf8string to NbtString")
-    }
-}
-
-/// A block name, an enum to decide if it contains a namespace or not.  
-///
-/// If you know that your blocks already contain a namespace, you can safetely construct a [`Name::Namespaced`].  
-///
-/// Otherwise if you don't know, construct a [`Name::Id`] and  
-/// let it auto-translate it to a namespaced on if it doesn't already contain a namespace
-/// The to namespace translation only happens once the name is actually writtent to NBT.  
-#[derive(Clone, Eq, Hash)]
-pub enum Name {
-    Namespaced(NbtString),
-    Id(NbtString),
 }
 
 impl Name {
@@ -451,51 +274,6 @@ impl Name {
             Name::Namespaced(n) => n.to_mutf8str(),
             Name::Id(n) => n.to_mutf8str(),
         }
-    }
-}
-
-impl Debug for Name {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", Name::into_namespaced(self.clone()).to_str())
-    }
-}
-
-impl Into<Mutf8String> for Name {
-    fn into(self) -> Mutf8String {
-        match self {
-            Name::Namespaced(n) => n.to_mutf8string(),
-            Name::Id(n) => n.to_mutf8string(),
-        }
-    }
-}
-
-impl Into<Name> for String {
-    fn into(self) -> Name {
-        Name::Id(self.into())
-    }
-}
-
-impl Into<Name> for &str {
-    fn into(self) -> Name {
-        Name::Id(self.into())
-    }
-}
-
-impl PartialEq<Name> for &str {
-    fn eq(&self, other: &Name) -> bool {
-        other.to_str() == *Cow::Borrowed(self)
-    }
-}
-
-impl PartialEq<Name> for Name {
-    fn eq(&self, other: &Name) -> bool {
-        other.to_str().as_str() == self.to_str().as_str()
-    }
-}
-
-impl PartialEq<&str> for Name {
-    fn eq(&self, other: &&str) -> bool {
-        self.to_str() == *Cow::Borrowed(other)
     }
 }
 
