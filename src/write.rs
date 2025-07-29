@@ -5,10 +5,10 @@ use crate::{
     Block, Error, Region, Result,
     data::{decode_data, encode_data},
     get_empty_chunk,
-    region::{BlockWithCoordinate, clean_palette, get_bit_count, is_valid_chunk},
+    region::{clean_palette, get_bit_count, is_valid_chunk},
 };
+use ahash::AHashMap;
 use simdnbt::owned::{NbtCompound, NbtList};
-use std::collections::HashMap;
 
 impl Region {
     pub(crate) const BLOCK_DATA_LEN: usize = 4096;
@@ -18,38 +18,38 @@ impl Region {
     /// Clears the internal buffered blocks instantly.  
     /// So if this function fails, do note that any blocks sent in via [`Self::set_block`] will get cleared.  
     pub fn write_blocks(&mut self) -> Result<()> {
-        let pending_blocks = std::mem::take(&mut self.pending_blocks);
-        let mut groups = group_blocks_into_chunks(pending_blocks);
-        // reset seen_blocks already here since we swapped pending_blocks with default
+        // reset seen_blocks already here since we consume pending_blocks
         self.seen_blocks.clear();
+
+        // we keep these here since we re-use these to hold onto their memory allocations.
+        let mut old_indexes: [i64; Region::BLOCK_DATA_LEN] = [0; Region::BLOCK_DATA_LEN];
+        let mut cached_palette_indexes: AHashMap<Block, i64> = AHashMap::with_capacity(4);
+        let mut block_entity_cache: AHashMap<(i32, i32, i32), bool> = AHashMap::new();
 
         // theres probably some way to convert this into a rayon par_iter or something
         // so this can be heavily faster, the only annoying thing is since this is all mutable reference to self.chunks
         // we cant Mutex: Self or self.chunks and lock because the entire "thread" needs to use a mutable ref constantly
-        for chunk_group in groups.iter_mut() {
-            let chunk = match self.chunks.get_mut(&chunk_group.coordinate) {
+        for (chunk_coords, section_map) in self.pending_blocks.iter_mut() {
+            let chunk = match self.chunks.get_mut(&chunk_coords) {
                 Some(chunk) => chunk,
                 None if self.config.create_chunk_if_missing => {
                     self.chunks.insert(
-                        chunk_group.coordinate,
-                        get_empty_chunk(chunk_group.coordinate, self.region_coords),
+                        *chunk_coords,
+                        get_empty_chunk(*chunk_coords, self.region_coords),
                     );
                     self.chunks
-                        .get_mut(&chunk_group.coordinate)
-                        .ok_or(Error::NoChunk(
-                            chunk_group.coordinate.0,
-                            chunk_group.coordinate.1,
-                        ))?
+                        .get_mut(&chunk_coords)
+                        .ok_or(Error::NoChunk(chunk_coords.0, chunk_coords.1))?
                 }
                 None => {
                     return Err(Error::TriedToModifyMissingChunk(
-                        chunk_group.coordinate.0,
-                        chunk_group.coordinate.1,
+                        chunk_coords.0,
+                        chunk_coords.1,
                     ));
                 }
             };
 
-            is_valid_chunk(&chunk, chunk_group.coordinate)?;
+            is_valid_chunk(&chunk, *chunk_coords)?;
 
             // clear heightmaps if they exist since they can become outdated after this
             if let Some(height_maps) = chunk.compound_mut("Heightmaps") {
@@ -85,7 +85,7 @@ impl Region {
                 }
             };
             // a little cache so we can find the index directly and remove it instead of looking up the coords everytime
-            let mut block_entity_cache: HashMap<(i32, i32, i32), bool> = HashMap::new();
+
             for be in block_entities.iter() {
                 let x = be.int("x").ok_or(Error::MissingNbtTag("x"))? & 15;
                 let y = be.int("y").ok_or(Error::MissingNbtTag("y"))? & 15;
@@ -96,7 +96,7 @@ impl Region {
 
             for section in sections.iter_mut() {
                 let y = section.byte("Y").ok_or(Error::MissingNbtTag("Y"))?;
-                let pending_blocks = match chunk_group.sections.remove(&y) {
+                let pending_blocks = match section_map.remove(&y) {
                     Some(pending_blocks) => pending_blocks,
                     None => continue,
                 };
@@ -123,8 +123,7 @@ impl Region {
                 };
                 let data = unsafe { (*state_ptr).long_array("data") };
 
-                let mut old_indexes =
-                    decode_data(Region::BLOCK_DATA_LEN, get_bit_count(palette.len()), data);
+                let data_len = decode_data(&mut old_indexes, get_bit_count(palette.len()), data);
 
                 // this *should* check for bad files
                 for idx in old_indexes.iter_mut() {
@@ -133,25 +132,30 @@ impl Region {
                     }
                 }
 
-                let mut cached_palette_indexes: HashMap<&Block, i64> = HashMap::new();
-                for block in &pending_blocks {
-                    let is_in_palette = palette.iter().any(|c| &block.block == c);
-
-                    if !is_in_palette {
-                        // this is the only .clone() in this entire code and i hate it but i must have it grrr
-                        let block_nbt = block.block.clone().to_compound()?;
-                        palette.push(block_nbt);
-                    }
+                for block in pending_blocks {
+                    // micro perf thing would be to keep track of "unique blocks"
+                    // and if its just 1 unique block for this entire .write_blocks()
+                    // we dont need to do any of this pretty much
+                    // and if its a set of like 1-3 blocks, a vec would prob be faster than ahashmap.
+                    // anyhow, this cached_palette_index and keeping track of the indexes
+                    // is the slowest part of write_blocks(), like the hashing, getting etc.
                     let palette_index = match cached_palette_indexes.get(&block.block) {
                         Some(idx) => *idx,
                         None => {
-                            let palette_index = palette
-                                .iter()
-                                .position(|c| &block.block == c)
-                                .ok_or(Error::NotInBlockPalette(block.block.clone()))?
-                                as i64;
-                            cached_palette_indexes.insert(&block.block, palette_index);
-                            palette_index
+                            // we just try to find the pos directly, and if there is a pos, goood
+                            // otherwise we can push and use the last index directly
+                            let palette_index = palette.iter().position(|c| &block.block == c);
+                            if let Some(palette_index) = palette_index {
+                                cached_palette_indexes.insert(block.block, palette_index as i64);
+                                palette_index as i64
+                            } else {
+                                let block_nbt = block.block.clone().to_compound()?;
+                                // if we push we already know its the last current index
+                                let palette_index = palette.len() as i64;
+                                palette.push(block_nbt);
+                                cached_palette_indexes.insert(block.block, palette_index);
+                                palette_index
+                            }
                         }
                     };
 
@@ -171,7 +175,9 @@ impl Region {
                     };
                 }
 
-                clean_palette(&mut old_indexes, palette);
+                cached_palette_indexes.clear();
+
+                clean_palette(&mut old_indexes, data_len, palette);
 
                 // remove any marked block entities
                 block_entities.retain(|be| {
@@ -184,6 +190,7 @@ impl Region {
                         _ => true,
                     }
                 });
+                block_entity_cache.clear();
 
                 if palette.len() == 1 {
                     // if theres only 1 palette we can remove the data
@@ -191,49 +198,12 @@ impl Region {
                     continue;
                 }
 
-                encode_data(
-                    Region::BLOCK_DATA_LEN,
-                    get_bit_count(palette.len()),
-                    old_indexes,
-                    state,
-                );
+                encode_data(get_bit_count(palette.len()), &old_indexes, data_len, state);
             }
         }
 
+        self.pending_blocks.clear();
+
         Ok(())
     }
-}
-
-pub(crate) struct ChunkGroup {
-    pub coordinate: (u8, u8),
-    pub sections: HashMap<i8, Vec<BlockWithCoordinate>>,
-}
-
-/// Groups a list of blocks into their own sections and chunks within a region  
-fn group_blocks_into_chunks(blocks: Vec<BlockWithCoordinate>) -> Vec<ChunkGroup> {
-    let mut map: HashMap<(u8, u8), HashMap<i8, Vec<BlockWithCoordinate>>> = HashMap::new();
-
-    for block in blocks {
-        let (chunk_x, chunk_z) = (
-            (block.coordinates.0 as f64 / 16f64).floor() as u8,
-            (block.coordinates.2 as f64 / 16f64).floor() as u8,
-        );
-        let section_y = (block.coordinates.1 as f64 / 16f64).floor() as i8;
-
-        map.entry((chunk_x, chunk_z))
-            .or_default()
-            .entry(section_y)
-            .or_default()
-            .push(block);
-    }
-
-    let mut chunk_groups = vec![];
-    for ((chunk_x, chunk_z), section_map) in map {
-        chunk_groups.push(ChunkGroup {
-            coordinate: (chunk_x, chunk_z),
-            sections: section_map,
-        });
-    }
-
-    chunk_groups
 }

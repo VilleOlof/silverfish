@@ -1,6 +1,6 @@
 //! `get` contains functions related to getting blocks from a [`Region`].  
 
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use crate::{
     Block, Error, Region, Result,
@@ -19,7 +19,8 @@ impl Region {
     /// assert_eq!(block, Block::new("dirt"));
     /// ```
     pub fn get_block(&self, x: u32, y: i32, z: u32) -> Result<Block> {
-        self.get_blocks(&[(x, y, z)]).map(|mut b| b.remove(0).block)
+        self.get_blocks(&[(x, y, z)])
+            .map(|mut b| b.swap_remove(0).block)
     }
 
     /// Returns the blocks at the specified coordinates *(local to within the region)*.  
@@ -50,6 +51,8 @@ impl Region {
                 .compounds()
                 .ok_or(Error::InvalidNbtType("sections"))?;
 
+            let mut indexes: [i64; Region::BLOCK_DATA_LEN] = [0; Region::BLOCK_DATA_LEN];
+
             for section in sections {
                 let y = section.byte("Y").ok_or(Error::MissingNbtTag("Y"))?;
                 let blocks_to_get = match chunk_group.sections.remove(&y) {
@@ -68,8 +71,7 @@ impl Region {
                     .compounds()
                     .ok_or(Error::InvalidNbtType("palette"))?;
 
-                let indexes =
-                    decode_data(Region::BLOCK_DATA_LEN, get_bit_count(palette.len()), data);
+                decode_data(&mut indexes, get_bit_count(palette.len()), data);
 
                 for (x, y, z) in blocks_to_get {
                     let index = (x & 15) + ((z & 15) * 16) + ((y & 15) as u32 * 16 * 16);
@@ -99,12 +101,12 @@ impl Region {
 
 pub(crate) struct GetChunkGroup {
     pub coordinate: (u8, u8),
-    pub sections: HashMap<i8, Vec<(u32, i32, u32)>>,
+    pub sections: AHashMap<i8, Vec<(u32, i32, u32)>>,
 }
 
 /// Groups a list of blocks into their own sections and chunks within a region  
 fn group_coordinates_into_chunks(blocks: &[(u32, i32, u32)]) -> Vec<GetChunkGroup> {
-    let mut map: HashMap<(u8, u8), HashMap<i8, Vec<(u32, i32, u32)>>> = HashMap::new();
+    let mut map: AHashMap<(u8, u8), AHashMap<i8, Vec<(u32, i32, u32)>>> = AHashMap::new();
 
     for (x, y, z) in blocks {
         let (chunk_x, chunk_z) = (
@@ -120,7 +122,7 @@ fn group_coordinates_into_chunks(blocks: &[(u32, i32, u32)]) -> Vec<GetChunkGrou
             .push((*x, *y, *z));
     }
 
-    let mut chunk_groups = vec![];
+    let mut chunk_groups = Vec::with_capacity(map.len());
     for ((chunk_x, chunk_z), section_map) in map {
         chunk_groups.push(GetChunkGroup {
             coordinate: (chunk_x, chunk_z),

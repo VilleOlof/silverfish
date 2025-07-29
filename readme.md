@@ -12,10 +12,11 @@ To actually flush the block changes to the chunks, call `Region::write_blocks`
 
 
 ```rust
-use rust_edit::{Region, Block};
+use rust_edit::{Region};
 
 let mut region = Region::full_empty((0, 0));
-region.set_block(42, 65, 84, Block::new("stone"));
+// look at `rust_edit::Block` for info on blocks
+region.set_block(42, 65, 84, "stone");
 region.write_blocks()?;
 let mut buf = vec![];
 region.write(&mut buf)?;
@@ -35,6 +36,33 @@ let region = Region::from_region(&mut region_buf, (0, 0))?;
 let block = region.get_block(42, 65, 84)?;
 ```
 
+### Biomes
+
+You can also set and or get biomes within your worlds.  
+Each biome in your world, at the lowest level is divided into 4x4x4 cells.  
+So to set a cell to a specific biome you have to specify:  
+- The chunk coordinates  
+- Section Y level  
+- Cell within the section  
+
+Or you can just call it with tuple: `(52, 12, 62)` with region local coordinates.  
+As it implements `Into<BiomeCell>` and will convert it for you.  
+
+```rust
+// Set a biome cell
+use rust_edit::{Region, BiomeCell}
+
+let mut region = Region::full_empty((0, 0));
+region.set_biome(BiomeCell::new((4, 1), -1, (1, 1, 3)), "minecraft:plains");
+region.write_biomes()?;
+```
+
+```rust
+// Get a biome cell
+let mut region = Region::full_empty((0, 0));
+let biome = region.get_biome((61, 12, 284))?;
+```
+
 ### Block properties
 
 Blocks can have any property attached to them.  
@@ -48,6 +76,8 @@ let block = Block::try_new_with_props(
     &[("waterlogged", "true"), ("pickles", "3")]
 )?;
 ```
+
+Look futher down under `performance` for more information on block names and their namespaces.  
 
 ### Region
 
@@ -95,3 +125,108 @@ region.config = config;
 Do note that all of these coordinates used above is local to the **region** *(x=0..512, z=0..512)*.  
 To transform normal *global* world coordinates to local region coordinates.  
 You can pass them through `rust_edit::to_region_local`.  
+
+
+## Performance
+
+There is already lot of optimizations put into this crate to make it quite fast, if you ask me.  
+But there is also some pitfalls and optimizations you,  
+as the user can do to modify your world even faster than before.  
+
+### Namespaced Blocks
+
+When you construct a `Block`, you may notice that the id argument you give is `B: Into<Name>`.  
+`Name` is an enum which can either be `Name::Namespaced` or `Name::Id`, this tells the block if it begins with  
+a namespace or not. A namespace is the `minecraft:` part of an id (`minecraft:furnace`, for example).  
+And if you know that your block has a namespace in it you can safetely construct a `Name` with a namespace.  
+
+```rust
+let name = Name::new_namespace("minecraft:bell");
+let block = Block::try_new(name)?;
+```
+
+Namespaces are not strictly *required* but heavily recommended incase  
+blocks would collide in let's say modded enviroments.  
+If you create a new `Block` with just a `&str` it will default to an `Name::Id` .  
+And automatically convert it to a namespaced variant if it doesn't contain a namespace on NBT write.  
+
+### Pre-allocating internal buffers
+
+If you already know which chunks and sections within your region  
+that you will modify, it helps to preallocate those internal buffers.  
+Since calling `region.set_block(...)` doesn't actually write the changes.  
+We store the blocks in internal buffers until `region.write_blocks` is called.  
+
+```rust
+let mut region = Region::full_empty((0, 0));
+// preallocates the first 16 chunks within the region
+region.allocate_block_buffer(0..4, 0..4, -4..20, 4096);
+region.set_block((6, 1, 7), "birch_planks");
+// ...
+```
+
+Note that calling `allocate_block_buffer` or `allocate_biome_buffer`  
+resets all internal buffers related to blocks.  
+So if you've called `set_block` before preallocating, all of that is gone.  
+
+If you need sparsed preallocation that isn't within a specific chunk range.  
+Look at `region.set_block_buffer` & `region.set_biome_buffer` to manage it yourself.  
+
+### Batching
+
+Almost all operations you do can be made in batches internally.  
+
+Let's say you're writing a ton of blocks.
+
+#### set_block: Single calls, slow
+```rust
+let mut region = Region::full_empty((0, 0));
+region.set_block(5, 1, 28, "air");
+region.write_blocks()?;
+region.set_block(71, -5, 14, "air");
+region.write_blocks()?;
+region.set_block(451, 51, 162, "air");
+region.write_blocks()?;
+```
+#### set_block: Batched, fast
+```rust
+let mut region = Region::full_empty((0, 0));
+region.set_block(5, 1, 28, "air");
+region.set_block(71, -5, 14, "air");
+region.set_block(451, 51, 162, "air");
+region.write_blocks()?;
+```
+
+This can also be applied to getting a ton of blocks at the same time.  
+
+#### get_block: Single calls, slow
+```rust
+let region = Region::full_empty((0, 0));
+let block_1 = region.get_block(6, 1, 4)?;
+let block_2 = region.get_block(1, -61, 52)?;
+let block_3 = region.get_block(78, 13, 152)?;
+let block_4 = region.get_block(4, 62, 84)?;
+```
+#### get_blocks: Batched, fast
+```rust
+let region = Region::full_empty((0, 0));
+let blocks = region.get_blocks(vec![
+    (6, 1, 4), (1, -61, 52),
+    (78, 13, 152), (4, 62, 84)
+])?;
+```
+
+All of this batching also applies to biomes and their get / set.  
+
+### Numbers
+
+While these are pointless in real world examples.  
+They are *fun*. 
+
+On my machine (Ryzen 7 5800X) and in release mode.  
+Have gotten a throughput of **10,168,009** blocks per second when writing to the chunks NBT.  
+
+The scenario was writing *100,663,296* blocks (an entire region) that only contained the same block.  
+So this got the maximum amount of palette caches hit and least clean up internally.  
+This was also with the entire region preallocated within the internal buffers.  
+And those 100 million or so blocks took *9s~* or so to flush from the buffers to NBT.  

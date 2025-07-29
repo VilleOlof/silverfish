@@ -8,38 +8,36 @@ use crate::{
     error::{Error, Result},
     nbt::Block,
 };
+use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
 use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
-    collections::HashMap,
     fmt::Debug,
     io::{Cursor, Read, Write},
     ops::{Deref, RangeInclusive},
 };
 
-// so ive tested filling an entire region with 1 single block
-//  (best case scenario for palette cache)
-// and got a throughput of `3,564,564` blocks per second*
-// on my machine with optimized compiler flags
+pub(crate) type BlockBuffer = AHashMap<(u8, u8), AHashMap<i8, Vec<BlockWithCoordinate>>>;
+pub(crate) type BiomeBuffer = AHashMap<(u8, u8), AHashMap<i8, Vec<BiomeCellWithId>>>;
 
 /// An in-memory region to read and write blocks to the chunks within.  
 #[derive(Clone)]
 pub struct Region {
     /// The chunks within the Region, mapped to their coordinates
-    pub chunks: HashMap<(u8, u8), NbtCompound>,
+    pub chunks: AHashMap<(u8, u8), NbtCompound>,
     /// Config on how it should handle certain scenarios
     pub config: Config,
     /// Coordinates for this specific region
     pub region_coords: (i32, i32),
 
     /// buffered blocks that is about to be written to `chunks`
-    pub(crate) pending_blocks: Vec<BlockWithCoordinate>,
+    pub(crate) pending_blocks: BlockBuffer,
     /// blocks we've already pushed to `pending_blocks` to avoid duplicate coordinate blocks
     pub(crate) seen_blocks: FixedBitSet,
 
     /// buffered biomes that is about to be written to `chunks`
-    pub(crate) pending_biomes: Vec<BiomeCellWithId>,
+    pub(crate) pending_biomes: BiomeBuffer,
     /// biomes we've already pushed to `pending_biomes` to avoid duplicate biome cells
     pub(crate) seen_biomes: FixedBitSet,
 }
@@ -82,14 +80,13 @@ impl Region {
     /// ```
     pub fn set_world_height(&mut self, range: RangeInclusive<isize>) {
         self.seen_biomes = Self::get_default_biome_bitset(range.clone());
-        self.pending_biomes = vec![]; // need to reset because we reset bitset
+        self.pending_biomes.clear(); // need to reset because we reset bitset
         self.config.world_height = range;
     }
 
     /// Creates an empty [`Region`] with no chunks or anything.  
     ///
     /// [`Config::create_chunk_if_missing`] will set to `true` from this  
-    #[inline(always)]
     pub fn empty(region_coords: (i32, i32)) -> Self {
         let config = Config {
             create_chunk_if_missing: true,
@@ -97,20 +94,19 @@ impl Region {
         };
 
         Self {
-            chunks: HashMap::new(),
+            chunks: AHashMap::new(),
             seen_blocks: Self::get_default_block_bitset(),
             seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
-            pending_blocks: vec![],
-            pending_biomes: vec![],
+            pending_blocks: AHashMap::new(),
+            pending_biomes: AHashMap::new(),
             region_coords,
             config,
         }
     }
 
     /// Creates a full [`Region`] with empty chunks in it.  
-    #[inline(always)]
     pub fn full_empty(region_coords: (i32, i32)) -> Self {
-        let mut chunks = HashMap::new();
+        let mut chunks = AHashMap::new();
 
         for x in 0..mca::REGION_SIZE as u8 {
             for z in 0..mca::REGION_SIZE as u8 {
@@ -122,16 +118,15 @@ impl Region {
     }
 
     /// Creates a new [`Region`] with chunks from `chunks`
-    #[inline(always)]
-    pub fn from_nbt(chunks: HashMap<(u8, u8), NbtCompound>, region_coords: (i32, i32)) -> Self {
+    pub fn from_nbt(chunks: AHashMap<(u8, u8), NbtCompound>, region_coords: (i32, i32)) -> Self {
         let config = Config::default();
 
         Self {
             chunks,
             seen_blocks: Self::get_default_block_bitset(),
             seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
-            pending_blocks: vec![],
-            pending_biomes: vec![],
+            pending_blocks: AHashMap::new(),
+            pending_biomes: AHashMap::new(),
             region_coords,
             config,
         }
@@ -144,11 +139,12 @@ impl Region {
     /// let mut region = Region::from_region(&mut File::open("r.0.0.mca")?)?;
     /// ```
     pub fn from_region<R: Read>(reader: &mut R, region_coords: (i32, i32)) -> Result<Self> {
+        // TODO could look at an average region and with_capacity on that?
         let mut bytes = vec![];
         reader.read_to_end(&mut bytes)?;
         let region_reader = RegionReader::new(&bytes)?;
 
-        let mut chunks = HashMap::new();
+        let mut chunks = AHashMap::new();
         for (i, chunk) in region_reader.iter().enumerate() {
             let chunk = chunk?;
             let chunk = match chunk {
@@ -227,7 +223,6 @@ impl Debug for Region {
 // returns the bit count for whatever palette_len.
 // we dont actually need to calculate anything fancy
 // palette_len cant be more than 4096 so we can pre set it up
-#[inline(always)]
 pub(crate) fn get_bit_count(len: usize) -> u32 {
     match len {
         0..=16 => 4, // i believe this should be 0..=16 since the old math had a .max(4) at the end, thus always getting 4 at the minimum
@@ -247,7 +242,7 @@ pub(crate) fn get_bit_count(len: usize) -> u32 {
 ///
 /// DataVersion is defaulted to [`Region::MIN_DATA_VERSION`]
 pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompound {
-    let mut sections: Vec<NbtCompound> = vec![];
+    let mut sections: Vec<NbtCompound> = Vec::with_capacity(24);
 
     for y in -4..=19 {
         let biomes = NbtCompound::from_values(vec![(
@@ -330,7 +325,7 @@ pub(crate) fn is_valid_chunk(chunk: &NbtCompound, coordinate: (u8, u8)) -> Resul
 }
 
 /// Removes unused elements from the palette and "cleans" it.  
-pub(crate) fn clean_palette<T>(data: &mut Vec<i64>, palette: &mut Vec<T>) {
+pub(crate) fn clean_palette<T>(data: &mut [i64], data_len: usize, palette: &mut Vec<T>) {
     let mut palette_count: Vec<i32> = vec![0; palette.len()];
     for index in data.deref() {
         palette_count[*index as usize] += 1;
@@ -352,7 +347,7 @@ pub(crate) fn clean_palette<T>(data: &mut Vec<i64>, palette: &mut Vec<T>) {
         i -= 1;
     }
 
-    for block in 0..data.len() {
+    for block in 0..data_len {
         data[block] -= palette_offsets[data[block] as usize];
     }
 }
@@ -424,14 +419,14 @@ mod test {
 
     #[test]
     fn empty_from_nbt_region() {
-        let chunks = HashMap::new();
+        let chunks = AHashMap::new();
         let region = Region::from_nbt(chunks, (0, 0));
         assert_eq!(region.chunks.len(), 0);
     }
 
     #[test]
     fn from_nbt_region() {
-        let mut chunks = HashMap::new();
+        let mut chunks = AHashMap::new();
         chunks.insert((4, 8), get_empty_chunk((4, 8), (0, 0)));
 
         let region = Region::from_nbt(chunks, (0, 0));
@@ -467,7 +462,7 @@ mod test {
 
     #[test]
     fn get_chunk() -> Result<()> {
-        let mut chunks = HashMap::new();
+        let mut chunks = AHashMap::new();
         chunks.insert((9, 1), get_empty_chunk((9, 1), (0, 0)));
 
         let region = Region::from_nbt(chunks, (0, 0));

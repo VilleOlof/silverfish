@@ -1,6 +1,12 @@
 //! `set` handles all functions related to pushing blocks to the [`Region`]'s internal block buffer.  
 
-use crate::{Block, Region, region::BlockWithCoordinate};
+use std::ops::Range;
+
+use crate::{
+    Block, Region,
+    region::{BlockBuffer, BlockWithCoordinate},
+};
+use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
 
 impl Region {
@@ -25,34 +31,75 @@ impl Region {
     /// // and to actually write the changes to the NBT
     /// region.write_blocks()?;
     /// ```
-    #[inline(always)]
-    pub fn set_block(&mut self, x: u32, y: i32, z: u32, block: Block) -> Option<()> {
+    pub fn set_block<B: Into<Block>>(&mut self, x: u32, y: i32, z: u32, block: B) -> Option<()> {
         let index = self.get_block_index(x, y, z);
         if !self.seen_blocks.contains(index) {
             self.seen_blocks.insert(index);
-            self.pending_blocks.push(BlockWithCoordinate {
-                coordinates: (x, y, z),
-                block,
-            });
+
+            let (chunk_x, chunk_z) = ((x / 16) as u8, (z / 16) as u8);
+            let section_y = (y as f64 / 16f64).floor() as i8;
+
+            self.pending_blocks
+                .entry((chunk_x, chunk_z))
+                .or_default()
+                .entry(section_y)
+                .or_default()
+                .push(BlockWithCoordinate {
+                    coordinates: (x, y, z),
+                    block: block.into(),
+                });
+
             return Some(());
         }
 
         None
     }
 
-    /// Allocates a new [`Vec`] with `size` as it's capacity.  
+    /// Due to how the internal buffer is grouped for batching later on.  
+    /// You can only define `chunk` and `section` ranges and how many blocks within each section.  
     ///
     /// Overwrites the already existing internal block buffer.  
     ///
-    /// Useful if you know exactly how many blocks you will push
-    /// to the internal buffer to avoid re-allocations.  
-    pub fn allocate_block_buffer(&mut self, size: usize) {
-        self.pending_blocks = Vec::with_capacity(size);
+    /// Useful if you know which areas in your region that you'll modify.  
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let mut region = Region::full_empty((0, 0));
+    /// region.allocate_block_buffer(0..16, 4..8, 1..3, 1024);
+    /// ```
+    pub fn allocate_block_buffer(
+        &mut self,
+        chunks_x: Range<u8>,
+        chunk_z: Range<u8>,
+        sections: Range<i8>,
+        blocks_per_section: usize,
+    ) {
+        let buffer = AHashMap::with_capacity(chunks_x.clone().count() * chunk_z.clone().count());
+
+        for x in chunks_x {
+            for z in chunk_z.clone() {
+                for y in sections.clone() {
+                    self.pending_blocks
+                        .entry((x, z))
+                        .or_insert_with(|| AHashMap::with_capacity(sections.clone().count()))
+                        .entry(y)
+                        .or_insert_with(|| Vec::with_capacity(blocks_per_section));
+                }
+            }
+        }
+
+        self.set_internal_block_buffer(buffer);
+    }
+
+    /// Sets the internal block buffer.  
+    ///
+    /// Overwrites any and all data related to the buffer.  
+    pub fn set_internal_block_buffer(&mut self, buffer: BlockBuffer) {
+        self.pending_blocks = buffer;
         self.seen_blocks.clear();
     }
 
     /// Returns the index for a block in the [`Self::seen_blocks`] bitset based of it's coordinates  
-    #[inline(always)]
     pub(crate) fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
         let y_offset = (y as isize - Self::REGION_Y_MIN) as usize;
         x as usize
@@ -61,7 +108,6 @@ impl Region {
     }
 
     /// Returns a [`FixedBitSet`] with a default capacity that holds an entire regions blocks for check  
-    #[inline(always)]
     pub(crate) fn get_default_block_bitset() -> FixedBitSet {
         FixedBitSet::with_capacity(Self::BITSET_SIZE)
     }

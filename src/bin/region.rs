@@ -13,12 +13,15 @@ fn main() {
     println!("took {:?} to set block", write_instant.elapsed());
 
     // // full region write
+    // let alloc_instant = Instant::now();
+    // region.allocate_block_buffer(0..32, 0..32, -4..20, 4096);
+    // println!("took {:?} to alloc", alloc_instant.elapsed());
     // let loop_instant = Instant::now();
-    // region.allocate_block_buffer(4096);
+    // let block = Block::new(rust_edit::Name::new_namespace("minecraft:terracotta"));
     // for x in 0..512 {
     //     for y in -64i32..320i32 {
     //         for z in 0..512 {
-    //             region.set_block(x, y, z, Block::new("terracotta"));
+    //             region.set_block(x, y, z, block.clone());
     //         }
     //     }
     // }
