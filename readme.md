@@ -50,7 +50,7 @@ As it implements `Into<BiomeCell>` and will convert it for you.
 
 ```rust
 // Set a biome cell
-use rust_edit::{Region, BiomeCell}
+use rust_edit::{Region, BiomeCell};
 
 let mut region = Region::full_empty((0, 0));
 region.set_biome(BiomeCell::new((4, 1), -1, (1, 1, 3)), "minecraft:plains");
@@ -59,6 +59,8 @@ region.write_biomes()?;
 
 ```rust
 // Get a biome cell
+use rust_edit::Region;
+
 let mut region = Region::full_empty((0, 0));
 let biome = region.get_biome((61, 12, 284))?;
 ```
@@ -229,7 +231,7 @@ let mut sections = Vec::with_capacity(24_576);
 for x in 0..32 {
     for y in -4..20 {
         for z in 0..32 {
-            sections.push((x, z), y, "minecraft:air");
+            sections.push(((x, z), y, "minecraft:air"));
         }
     }
 }
