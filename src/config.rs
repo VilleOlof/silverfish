@@ -14,7 +14,7 @@ pub struct Config {
 
     /// How tall/deep the world is, defaults to `-64..=320`
     ///
-    /// Used for properly setting biome cells
+    /// Used for properly setting internal buffers.  
     pub(crate) world_height: RangeInclusive<isize>,
 }
 

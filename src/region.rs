@@ -58,11 +58,7 @@ impl Region {
     pub const MIN_DATA_VERSION: i32 = 2860;
 
     // some constants for the FixedBitSet & indexes
-    pub(crate) const REGION_X_Z_WIDTH: usize = 512;
-    pub(crate) const REGION_Y_MIN: isize = -64;
-    pub(crate) const REGION_Y_MAX: isize = 320;
     pub(crate) const REGION_CHUNK_SIZE: u8 = 32;
-    pub(crate) const REGION_Y_WIDTH: usize = (Self::REGION_Y_MAX - Self::REGION_Y_MIN) as usize;
 
     /// Updates the world height in the [`Config`].  
     ///
@@ -95,7 +91,7 @@ impl Region {
 
         Self {
             chunks: AHashMap::new(),
-            seen_blocks: Self::get_default_block_bitset(),
+            seen_blocks: Self::get_default_block_bitset(&config),
             seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
             pending_blocks: AHashMap::new(),
             pending_biomes: AHashMap::new(),
@@ -123,7 +119,7 @@ impl Region {
 
         Self {
             chunks,
-            seen_blocks: Self::get_default_block_bitset(),
+            seen_blocks: Self::get_default_block_bitset(&config),
             seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
             pending_blocks: AHashMap::new(),
             pending_biomes: AHashMap::new(),

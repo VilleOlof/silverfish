@@ -18,3 +18,4 @@ pub use config::Config;
 pub use error::{Error, Result};
 pub use nbt::{Block, Name, NbtString};
 pub use region::{BlockWithCoordinate, Region, get_empty_chunk, to_region_local};
+pub const BLOCKS_PER_REGION: u32 = 512;

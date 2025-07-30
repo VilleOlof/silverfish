@@ -1,6 +1,6 @@
 //! `error` contains the [`Error`] type for this crate and a shorthand [`Result`] type.  
 
-use crate::{NbtString, nbt::Block, region::Region};
+use crate::{BLOCKS_PER_REGION, NbtString, nbt::Block, region::Region};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -16,7 +16,7 @@ pub enum Error {
 
     #[error(
         "Coordinates are outside of regions bounds ({0} || {1} >= {width})",
-        width = Region::REGION_X_Z_WIDTH
+        width = BLOCKS_PER_REGION
     )]
     CoordinatesOutOfRegionBounds(u32, u32),
     #[error("Chunk coordinates are outside of region bounds ({0} || {1} >= 32")]

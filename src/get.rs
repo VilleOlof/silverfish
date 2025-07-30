@@ -1,12 +1,11 @@
 //! `get` contains functions related to getting blocks from a [`Region`].  
 
-use ahash::AHashMap;
-
 use crate::{
     Block, Error, Region, Result,
     data::decode_data,
     region::{BlockWithCoordinate, get_bit_count},
 };
+use ahash::AHashMap;
 
 impl Region {
     /// Returns the block at the specified coordinates *(local to within the region)*.  

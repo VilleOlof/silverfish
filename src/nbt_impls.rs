@@ -1,8 +1,6 @@
-use std::{borrow::Cow, collections::BTreeMap, fmt::Debug, hash::Hash};
-
-use simdnbt::{Mutf8Str, Mutf8String, owned::NbtCompound};
-
 use crate::{Block, Name, NbtString};
+use simdnbt::{Mutf8Str, Mutf8String, owned::NbtCompound};
+use std::{borrow::Cow, collections::BTreeMap, fmt::Debug, hash::Hash};
 
 impl Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,6 +38,12 @@ impl Into<Block> for &str {
 }
 
 impl Into<Block> for String {
+    fn into(self) -> Block {
+        Block::new(self)
+    }
+}
+
+impl Into<Block> for Name {
     fn into(self) -> Block {
         Block::new(self)
     }
@@ -167,6 +171,12 @@ impl Into<Name> for String {
 impl Into<Name> for &str {
     fn into(self) -> Name {
         Name::Id(self.into())
+    }
+}
+
+impl Into<Name> for NbtString {
+    fn into(self) -> Name {
+        Name::Id(self)
     }
 }
 

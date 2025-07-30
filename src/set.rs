@@ -1,17 +1,20 @@
 //! `set` handles all functions related to pushing blocks to the [`Region`]'s internal block buffer.  
 
-use std::ops::Range;
-
 use crate::{
-    Block, Region,
+    BLOCKS_PER_REGION, Block, Config, Region,
     region::{BlockBuffer, BlockWithCoordinate},
 };
 use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
+use std::ops::{Range, RangeInclusive};
 
 impl Region {
-    pub(crate) const BITSET_SIZE: usize =
-        Self::REGION_X_Z_WIDTH * Self::REGION_Y_WIDTH * Self::REGION_X_Z_WIDTH;
+    /// The given bitset size for pending blocks
+    pub(crate) fn bitset_size(world_height: &RangeInclusive<isize>) -> usize {
+        BLOCKS_PER_REGION as usize
+            * (world_height.end() - world_height.start()) as usize
+            * BLOCKS_PER_REGION as usize
+    }
 
     /// Set a block at the specified coordinates *(local to within the region)*.  
     ///
@@ -101,15 +104,17 @@ impl Region {
 
     /// Returns the index for a block in the [`Self::seen_blocks`] bitset based of it's coordinates  
     pub(crate) fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
-        let y_offset = (y as isize - Self::REGION_Y_MIN) as usize;
+        let y_offset = (y as isize - self.config.world_height.start()) as usize;
         x as usize
-            + y_offset * Self::REGION_X_Z_WIDTH
-            + z as usize * Self::REGION_X_Z_WIDTH * Self::REGION_Y_WIDTH
+            + y_offset * BLOCKS_PER_REGION as usize
+            + z as usize
+                * BLOCKS_PER_REGION as usize
+                * (self.config.world_height.end() - self.config.world_height.start()) as usize
     }
 
     /// Returns a [`FixedBitSet`] with a default capacity that holds an entire regions blocks for check  
-    pub(crate) fn get_default_block_bitset() -> FixedBitSet {
-        FixedBitSet::with_capacity(Self::BITSET_SIZE)
+    pub(crate) fn get_default_block_bitset(config: &Config) -> FixedBitSet {
+        FixedBitSet::with_capacity(Self::bitset_size(&config.world_height))
     }
 }
 

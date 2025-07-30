@@ -3,7 +3,13 @@
 ![Silverfish Logo](./logo.webp)
 
 Easily edit Minecraft worlds with a simple, fast and powerful API.  
-Works with worlds from version 1.18+ (including modded worlds).  
+Works with worlds from version **1.18+** (including modded worlds).  
+
+With `silverfish` you can set blocks, retrive blocks.  
+Even set and get biomes, all in an easy to use crate.  
+
+You can either continue reading the documentation.  
+Or look at some examples in `examples/*`.  
 
 ### Set block
 

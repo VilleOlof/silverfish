@@ -1,7 +1,5 @@
-use silverfish::{Region, Result};
+use silverfish::{BLOCKS_PER_REGION, Region, Result};
 use std::fs::File;
-
-const BLOCKS_PER_REGION: u32 = 512;
 
 pub fn main() -> Result<()> {
     let mut region = Region::full_empty((0, 0));
