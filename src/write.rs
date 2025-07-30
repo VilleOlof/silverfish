@@ -394,9 +394,7 @@ mod test {
             }
         }
 
-        let instant = Instant::now();
         region.set_sections(sections)?;
-        println!("filling region took: {:?}", instant.elapsed());
 
         let sample = region.get_block(483, 281, 313)?;
         assert_eq!(sample, block);

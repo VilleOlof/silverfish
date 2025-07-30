@@ -30,3 +30,6 @@ harness = false
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[workspace]
+members = ["examples/*"]

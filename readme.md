@@ -122,10 +122,10 @@ region.config = config;
 
 ----
 
-Do note that all of these coordinates used above is local to the **region** *(x=0..512, z=0..512)*.  
-To transform normal *global* world coordinates to local region coordinates.  
-You can pass them through `rust_edit::to_region_local`.  
-
+> [!NOTE]  
+> Do note that all of these coordinates used above is local to the **region** *(x=0..512, z=0..512)*.  
+> To transform normal *global* world coordinates to local region coordinates.  
+> You can pass them through `rust_edit::to_region_local`.  
 
 ## Performance
 
@@ -215,6 +215,30 @@ let blocks = region.get_blocks(vec![
     (78, 13, 152), (4, 62, 84)
 ])?;
 ```
+
+### Set Sections
+
+If you know that you will fill, let's say an entire region with a single block.  
+It is over 10x times faster to do it via `region.set_sections`.  
+This function and it's brother (`set_section`), allows you to set an entire  
+section *(4096 blocks, 16\*16\*16)* to a single block at once.  
+
+```rust
+let mut region = Region::full_empty((0, 0));
+let mut sections = Vec::with_capacity(24_576);
+for x in 0..32 {
+    for y in -4..20 {
+        for z in 0..32 {
+            sections.push((x, z), y, "minecraft:air");
+        }
+    }
+}
+region.set_sections(sections)?;
+```
+
+Look at the [Minecraft Wiki](https://minecraft.wiki/w/Chunk_format) for more information on what how sections are structured.  
+
+----
 
 All of this batching also applies to biomes and their get / set.  
 
