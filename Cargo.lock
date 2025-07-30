@@ -201,7 +201,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 name = "flat_world"
 version = "0.1.0"
 dependencies = [
- "rust-edit",
+ "silverfish",
 ]
 
 [[package]]
@@ -449,18 +449,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
-name = "rust-edit"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "criterion",
- "fixedbitset",
- "mca",
- "simdnbt",
- "thiserror 2.0.12",
-]
-
-[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -536,6 +524,18 @@ dependencies = [
  "memchr",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "silverfish"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "criterion",
+ "fixedbitset",
+ "mca",
+ "simdnbt",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

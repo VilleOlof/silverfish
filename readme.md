@@ -1,4 +1,6 @@
-# rust-edit *(name pending)*
+# silverfish
+
+![Silverfish Logo](./logo.webp)
 
 Easily edit Minecraft worlds with a simple, fast and powerful API.  
 Works with worlds from version 1.18+ (including modded worlds).  
@@ -12,10 +14,10 @@ To actually flush the block changes to the chunks, call `Region::write_blocks`
 
 
 ```rust
-use rust_edit::Region;
+use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
-// look at `rust_edit::Block` for info on blocks
+// look at `silverfish::Block` for info on blocks
 region.set_block(42, 65, 84, "stone");
 region.write_blocks()?;
 let mut buf = vec![];
@@ -29,7 +31,7 @@ Use `Region::get_blocks` with a list of coordinates to batch them together.
 
 
 ```rust
-use rust_edit::Region;
+use silverfish::Region;
 
 let mut region_buf = vec![];
 let region = Region::from_region(&mut region_buf, (0, 0))?;
@@ -50,7 +52,7 @@ As it implements `Into<BiomeCell>` and will convert it for you.
 
 ```rust
 // Set a biome cell
-use rust_edit::{Region, BiomeCell};
+use silverfish::{Region, BiomeCell};
 
 let mut region = Region::full_empty((0, 0));
 region.set_biome(BiomeCell::new((4, 1), -1, (1, 1, 3)), "minecraft:plains");
@@ -59,7 +61,7 @@ region.write_biomes()?;
 
 ```rust
 // Get a biome cell
-use rust_edit::Region;
+use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
 let biome = region.get_biome((61, 12, 284))?;
@@ -71,7 +73,7 @@ Blocks can have any property attached to them.
 The `Block` comes with both `new` & `new_with_props` and a `try` version that returns a result.  
 
 ```rust
-use rust_edit::Block;
+use silverfish::Block;
 
 let block = Block::try_new_with_props(
     "minecraft:sea_pickle", 
@@ -88,7 +90,7 @@ And can be constructed via 4 different methods.
 Note that the last argument for any `Region` constructor is the region coordinates.  
 
 ```rust
-use rust_edit::Region;
+use silverfish::Region;
 
 // A new empty region with no chunk data
 let region = Region::empty(...);
@@ -112,7 +114,7 @@ Minecraft will automatically update the lighting in the chunks on first reload.
 *(which is set to true by default)*
 
 ```rust
-use rust_edit::{Config, Region};
+use silverfish::{Config, Region};
 
 let mut region = Region::full_empty((0, 0));
 let config = Config {
@@ -127,7 +129,7 @@ region.config = config;
 > [!NOTE]  
 > Do note that all of these coordinates used above is local to the **region** *(x=0..512, z=0..512)*.  
 > To transform normal *global* world coordinates to local region coordinates.  
-> You can pass them through `rust_edit::to_region_local`.  
+> You can pass them through `silverfish::to_region_local`.  
 
 ## Performance
 

@@ -1,4 +1,4 @@
-use rust_edit::{Region, Result};
+use silverfish::{Region, Result};
 use std::fs::File;
 
 const BLOCKS_PER_REGION: u32 = 512;

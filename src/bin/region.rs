@@ -1,51 +1,51 @@
 use std::{fs::File, time::Instant};
 
-use rust_edit::{Block, Region};
+use silverfish::{Block, Region};
 
 fn main() {
     let mut region = Region::full_empty((0, 0));
-    // region.set_block(2, 80, 2, Block::new("beacon"));
-    // let write_instant = Instant::now();
-    // region
-    //     .write_blocks()
-    //     .inspect_err(|e| println!("{e}"))
-    //     .unwrap();
-    // println!("took {:?} to set block", write_instant.elapsed());
-
-    // full region write
-    let alloc_instant = Instant::now();
-    region.allocate_block_buffer(0..32, 0..32, -4..20, 4096);
-    println!("took {:?} to alloc", alloc_instant.elapsed());
-    let loop_instant = Instant::now();
-    let block = Block::new(rust_edit::Name::new_namespace("minecraft:terracotta"));
-    for x in 0..512 {
-        for y in -64i32..320i32 {
-            for z in 0..512 {
-                region.set_block(x, y, z, block.clone());
-            }
-        }
-    }
-    println!("took {:?} to loop, writing...", loop_instant.elapsed());
+    region.set_block(2, 80, 2, Block::new("beacon"));
     let write_instant = Instant::now();
     region
         .write_blocks()
         .inspect_err(|e| println!("{e}"))
         .unwrap();
-    println!(
-        "took {:?} to set block, total: {:?}",
-        write_instant.elapsed(),
-        loop_instant.elapsed()
-    );
+    println!("took {:?} to set block", write_instant.elapsed());
 
-    // let get_instant = Instant::now();
+    // // full region write
+    // let alloc_instant = Instant::now();
+    // region.allocate_block_buffer(0..32, 0..32, -4..20, 4096);
+    // println!("took {:?} to alloc", alloc_instant.elapsed());
+    // let loop_instant = Instant::now();
+    // let block = Block::new(silverfish::Name::new_namespace("minecraft:terracotta"));
+    // for x in 0..512 {
+    //     for y in -64i32..320i32 {
+    //         for z in 0..512 {
+    //             region.set_block(x, y, z, block.clone());
+    //         }
+    //     }
+    // }
+    // println!("took {:?} to loop, writing...", loop_instant.elapsed());
+    // let write_instant = Instant::now();
+    // region
+    //     .write_blocks()
+    //     .inspect_err(|e| println!("{e}"))
+    //     .unwrap();
     // println!(
-    //     "{:?}",
-    //     region
-    //         .get_block(2, 80, 2)
-    //         .inspect_err(|e| println!("{e}"))
-    //         .unwrap()
+    //     "took {:?} to set block, total: {:?}",
+    //     write_instant.elapsed(),
+    //     loop_instant.elapsed()
     // );
-    // println!("took {:?} to get block", get_instant.elapsed());
+
+    let get_instant = Instant::now();
+    println!(
+        "{:?}",
+        region
+            .get_block(2, 80, 2)
+            .inspect_err(|e| println!("{e}"))
+            .unwrap()
+    );
+    println!("took {:?} to get block", get_instant.elapsed());
 
     region
         .write(&mut File::create("./r.0.0.mca").unwrap())

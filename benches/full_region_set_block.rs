@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use rust_edit::{Block, Region};
+use silverfish::{Block, Region};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_region");

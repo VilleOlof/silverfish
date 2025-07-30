@@ -357,11 +357,8 @@ impl Region {
 
 #[cfg(test)]
 mod test {
-    use std::time::Instant;
-
-    use crate::Name;
-
     use super::*;
+    use crate::Name;
 
     #[test]
     fn set_section() -> Result<()> {

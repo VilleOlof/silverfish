@@ -1,5 +1,5 @@
 [package]
-name = "rust-edit"
+name = "silverfish"
 description = "Easily edit Minecraft worlds with a simple, fast and powerful API"
 version = "0.1.0"
 edition = "2024"
@@ -8,7 +8,7 @@ categories = ["parser-implementations", "game-development"]
 keywords = ["minecraft", "nbt", "chunk", "edit", "block"]
 readme = "readme.md"
 license = "MIT"
-repository = "https://github.com/VilleOlof/rust-edit"
+repository = "https://github.com/VilleOlof/silverfish"
 
 [dependencies]
 simdnbt = { version = "0.7.1", git = "https://github.com/azalea-rs/simdnbt", rev = "4787a8f5326e7f4a20263873310f0893a59e33ba" }
