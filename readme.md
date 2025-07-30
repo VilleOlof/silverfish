@@ -246,7 +246,7 @@ for x in 0..32 {
 region.set_sections(sections)?;
 ```
 
-Look at the [Minecraft Wiki](https://minecraft.wiki/w/Chunk_format) for more information on what how sections are structured.  
+Look at the [Minecraft Wiki](https://minecraft.wiki/w/Chunk_format) for more information on how sections are structured.  
 
 ----
 
@@ -263,4 +263,5 @@ Have gotten a throughput of **10,168,009** blocks per second when writing to the
 The scenario was writing *100,663,296* blocks (an entire region) that only contained the same block.  
 So this got the maximum amount of palette caches hit and least clean up internally.  
 This was also with the entire region preallocated within the internal buffers.  
-And those 100 million or so blocks took *9s~* or so to flush from the buffers to NBT.  
+And didn't use `set_section` or `set_sections` which is faster in real world use.  
+Those 100 million or so blocks took *9s~* or so to flush from the buffers to NBT.  
