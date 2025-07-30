@@ -12,7 +12,7 @@ To actually flush the block changes to the chunks, call `Region::write_blocks`
 
 
 ```rust
-use rust_edit::{Region};
+use rust_edit::Region;
 
 let mut region = Region::full_empty((0, 0));
 // look at `rust_edit::Block` for info on blocks
