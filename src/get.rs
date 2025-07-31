@@ -15,9 +15,12 @@ impl Region {
     /// Global coordinates can be converted to region local via [`silverfish::to_region_local`](crate::to_region_local).  
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::{Region, Block};
+    /// # let region = Region::default();
     /// let block = region.get_block(5, 97, 385)?;
-    /// assert_eq!(block, Block::new("dirt"));
+    /// assert_eq!(block, Block::new("minecraft:air"));
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn get_block(&self, x: u32, y: i32, z: u32) -> Result<Block> {
         self.get_blocks(&[(x, y, z)])
@@ -32,9 +35,11 @@ impl Region {
     /// Global coordinates can be converted to region local via [`silverfish::to_region_local`](crate::to_region_local).  
     ///
     /// ## Example
-    /// ```no_run
-    /// let blocks = region.get_blocks(&[(5, 97, 385), (5, 97, 386), 52, 12, 52])?;
+    /// ```
+    /// # let region = silverfish::Region::default();
+    /// let blocks = region.get_blocks(&vec![(5, 97, 385), (5, 97, 386), (52, 12, 52)])?;
     /// assert_eq!(blocks.len(), 3);
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn get_blocks(&self, blocks: &[(u32, i32, u32)]) -> Result<Vec<BlockWithCoordinate>> {
         let mut found_blocks = Vec::with_capacity(blocks.len());
@@ -110,9 +115,11 @@ impl Region {
     /// Global coordinates can be converted to region local via [`silverfish::to_region_local`](crate::to_region_local).  
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # let region = silverfish::Region::default();
     /// let biome = region.get_biome((82, 62, 7))?;
-    /// assert_eq!(biome, "minecraft:meadow");
+    /// assert_eq!(biome, "minecraft:plains");
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn get_biome<C: Into<BiomeCell>>(&self, cell: C) -> Result<NbtString> {
         self.get_biomes(vec![cell]).map(|mut b| b.swap_remove(0).id)
@@ -123,9 +130,11 @@ impl Region {
     /// Global coordinates can be converted to region local via [`silverfish::to_region_local`](crate::to_region_local).  
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # let region = silverfish::Region::default();
     /// let biomes = region.get_biomes(vec![(52, 85, 152), (94, -4, 481)])?;
     /// assert_eq!(biomes.len(), 2);
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn get_biomes<C: Into<BiomeCell>>(&self, cells: Vec<C>) -> Result<Vec<BiomeCellWithId>> {
         let mut found_biomes = Vec::with_capacity(cells.len());
@@ -242,7 +251,7 @@ mod test {
 
     #[test]
     fn get_block() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region.set_block(5, 52, 17, "minecraft:crafter")?;
         region.write_blocks()?;
         let block = region.get_block(5, 52, 17)?;
@@ -253,7 +262,7 @@ mod test {
 
     #[test]
     fn get_blocks() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region.set_block(82, 14, 92, "minecraft:lime_concrete")?;
         region.set_block(56, 192, 25, "minecraft:red_concrete")?;
         region.set_block(482, -52, 131, "minecraft:yellow_concrete")?;
@@ -272,7 +281,7 @@ mod test {
 
     #[test]
     fn invalid_get_coords() {
-        let region = Region::full_empty((0, 0));
+        let region = Region::default();
         assert!(region.get_block(852, 14, 5212).is_err())
     }
 }

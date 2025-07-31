@@ -29,7 +29,7 @@ pub struct Region {
     /// The chunks within the Region, mapped to their coordinates
     pub chunks: DashMap<(u8, u8), ChunkData>,
     /// Config on how it should handle certain scenarios
-    pub config: Config,
+    config: Config,
     /// Coordinates for this specific region
     pub region_coords: (i32, i32),
 }
@@ -37,7 +37,9 @@ pub struct Region {
 /// Just a [`Block`] but with a set of coordinates attached to them.  
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockWithCoordinate {
+    /// The attached coordinates related to the block.  
     pub coordinates: (u32, i32, u32),
+    /// The block itself.  
     pub block: Block,
 }
 
@@ -49,6 +51,27 @@ impl Region {
     /// This is due the massive structural changes in how the nbt is stored that was introduced in `21w39a` & `21w43a`
     pub const MIN_DATA_VERSION: i32 = 2860;
 
+    /// Returns the Region's [`Config`]
+    pub fn get_config(&self) -> &Config {
+        &self.config
+    }
+
+    /// Sets the [`Config`] and re-inits all internal buffers if `world_height` is different.  
+    ///
+    /// Returns `true` if the `world_height` was different and it did reset all internal buffers.  
+    pub fn set_config(&mut self, config: Config) -> Result<bool> {
+        let changed_world_height = if self.config.world_height != config.world_height {
+            self.set_world_height(config.world_height.clone())?;
+            true
+        } else {
+            false
+        };
+
+        self.config = config;
+
+        Ok(changed_world_height)
+    }
+
     /// Updates the world height in the [`Config`].  
     ///
     /// #### Why is `world_height` private in [`Config`] and only mutated through [`Region`] ?
@@ -59,16 +82,18 @@ impl Region {
     /// So when you get a region, it always defaults to Minecrafts vanilla range of world_height.  
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut region = Region::full_empty((0, 0));
+    /// ```
+    /// # use silverfish::Region;
+    /// # let mut region = Region::default();
     /// region.set_world_height(128..=320);
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn set_world_height(&mut self, range: RangeInclusive<isize>) -> Result<()> {
         // clear all the chunks buffers
         let world_height_count = range.clone().count();
         for x in 0..32 {
             for z in 0..32 {
-                let mut chunk = self.get_mut_chunk(x, z)?;
+                let mut chunk = self.get_chunk_mut(x, z)?;
                 chunk.pending_blocks = AHashMap::new();
                 chunk.pending_biomes = AHashMap::new();
                 chunk.seen_blocks = ChunkData::block_bitset(world_height_count);
@@ -132,11 +157,14 @@ impl Region {
     /// Creates a [`Region`] from an already existing region
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut region = Region::from_region(&mut File::open("r.0.0.mca")?)?;
+    /// ```
+    /// # use silverfish::Region;
+    /// # use std::fs::File;
+    /// let mut region = Region::from_region(&mut File::open("r.0.0.mca")?, (0, 0))?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn from_region<R: Read>(reader: &mut R, region_coords: (i32, i32)) -> Result<Self> {
-        let mut bytes = Vec::with_capacity(4_000_000); // 4000 KB, just an average start on the vec to skip a few common re-allocations
+        let mut bytes = Vec::with_capacity(4_194_304); // 4 MB, just an average start on the vec to skip a few common re-allocations
         reader.read_to_end(&mut bytes)?;
         let region_reader = RegionReader::new(&bytes)?;
 
@@ -166,9 +194,11 @@ impl Region {
     /// just return whatever input you gave it initially
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # let mut region = silverfish::Region::default();
     /// let mut buf = vec![];
     /// region.write(&mut buf)?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn write<W: Write>(self, writer: &mut W) -> Result<()> {
         let mut region_writer = RegionWriter::new();
@@ -193,8 +223,10 @@ impl Region {
     /// Do note that these chunk coordinates are local to within the region itself.  
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # let mut region = silverfish::Region::default();
     /// let chunk = region.get_chunk(5, 17)?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<Arc<NbtCompound>>> {
         if x >= mca::REGION_SIZE as u8 || z >= mca::REGION_SIZE as u8 {
@@ -219,10 +251,13 @@ impl Region {
     /// Do note that these chunk coordinates are local to within the region itself.
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut chunk = region.get_mut_chunk(1, 13)?;
     /// ```
-    pub fn get_mut_chunk<'a>(&'a self, x: u8, z: u8) -> Result<RefMut<'a, (u8, u8), ChunkData>> {
+    /// # let mut region = silverfish::Region::default();
+    /// let mut chunk = region.get_chunk_mut(1, 13)?;
+    /// let _ = chunk.set_block(6, 124, 14, "anvil")?;
+    /// # Ok::<(), silverfish::Error>(())
+    /// ```
+    pub fn get_chunk_mut<'a>(&'a self, x: u8, z: u8) -> Result<RefMut<'a, (u8, u8), ChunkData>> {
         if x >= mca::REGION_SIZE as u8 || z >= mca::REGION_SIZE as u8 {
             return Err(Error::ChunkOutOfRegionBounds(x, z));
         }
@@ -353,7 +388,8 @@ pub fn get_empty_chunk(
 /// Converts a piece of global world coordinates to coordinates within it's region.  
 ///
 /// ## Example
-/// ```no_run
+/// ```
+/// # use silverfish::to_region_local;
 /// let coords = (-841, -17, 4821);
 /// let local_coords = to_region_local(coords);
 /// assert_eq!(local_coords, (183, -17, 213))
@@ -420,11 +456,16 @@ pub(crate) fn clean_palette<T>(data: &mut [i64], data_len: usize, palette: &mut 
     }
 }
 
+impl Default for Region {
+    fn default() -> Self {
+        Region::full_empty((0, 0))
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::io::BufReader;
-
     use super::*;
+    use std::io::BufReader;
 
     #[test]
     fn same_region_local_coordinates() {
@@ -481,7 +522,7 @@ mod test {
 
     #[test]
     fn full_empty_region() {
-        let region = Region::full_empty((0, 0));
+        let region = Region::default();
         assert_eq!(region.chunks.len(), 1024);
     }
 

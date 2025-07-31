@@ -10,7 +10,9 @@ use std::{borrow::Cow, collections::BTreeMap, hash::Hash};
 /// A Minecraft [Block](https://minecraft.wiki/w/Block), used when setting blocks or when retrieving blocks
 #[derive(Clone, PartialEq, Eq)]
 pub struct Block {
+    /// The id of the block, look at [`Name`] for more info.  
     pub name: Name,
+    /// Optional block properties attached to the blocok.  
     pub properties: Option<BTreeMap<NbtString, NbtString>>,
 }
 
@@ -29,11 +31,14 @@ pub struct NbtString(pub(crate) Vec<u8>);
 /// The to namespace translation only happens once the name is actually writtent to NBT.  
 #[derive(Clone, Eq, Hash)]
 pub enum Name {
+    /// A block name which has a namespace at the start `<namespace>:<id>`
     Namespaced(NbtString),
+    /// A block name that may or may not have a namespace `<namespace?>:<id>`
     Id(NbtString),
 }
 
 impl NbtString {
+    /// Creates a new [`NbtString`] from maybe an [`Mutf8Str`]
     pub fn from_mutf8str(string: Option<&Mutf8Str>) -> Option<Self> {
         let data = string.map(|s| s.as_bytes().to_vec());
         match data {
@@ -42,28 +47,34 @@ impl NbtString {
         }
     }
 
+    /// Creates a new [`Mutf8String`] from the [`NbtString]
     pub fn to_mutf8string(self) -> Mutf8String {
         Mutf8String::from_vec(self.0)
     }
 
+    /// Creates a new [`Mutf8Str`] from the [`NbtString]
     pub fn to_mutf8str(&self) -> &Mutf8Str {
         Mutf8Str::from_slice(&self.0)
     }
 
+    /// Creates a new [`NbtString`] from [`str`]
     pub fn from_str(value: &str) -> Result<Self> {
         NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&value))).ok_or(Error::InvalidNbtType(
             "Failed to convert str to mutf8str & nbtstring",
         ))
     }
 
+    /// Get the [`NbtString`] as a `Cow<'_, str>`
     pub fn to_str(&self) -> Cow<'_, str> {
         self.to_mutf8str().to_str()
     }
 
+    /// Creates a new [`String`] from the [`NbtString`]
     pub fn to_string(&self) -> String {
         self.to_mutf8str().to_string()
     }
 
+    /// Returns the inner [`Vec<u8>`] that represents this [`NbtString`]
     pub fn inner(&self) -> &Vec<u8> {
         &self.0
     }
@@ -77,8 +88,10 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::Block;
     /// let beacon = Block::try_new("beacon")?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn try_new<B: Into<Name>>(block: B) -> Result<Self> {
         Ok(Block {
@@ -92,8 +105,10 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::Block;
     /// let conduit = Block::try_new_with_props("conduit", &[("pickles", "4")])?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn try_new_with_props<B: Into<Name>>(
         block: B,
@@ -117,7 +132,8 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::Block;
     /// let beacon = Block::new("beacon");
     /// ```
     pub fn new<B: Into<Name>>(block: B) -> Self {
@@ -129,7 +145,8 @@ impl Block {
     /// Auto populates into minecraft namespace if no namespace was given
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::Block;
     /// let conduit = Block::new_with_props("conduit", [("pickles", "4")]);
     /// ```
     pub fn new_with_props<B: Into<Name>, const N: usize>(

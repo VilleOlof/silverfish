@@ -1,7 +1,10 @@
+#![allow(missing_docs)]
+
 //! `error` contains the [`Error`] type for this crate and a shorthand [`Result`] type.  
 
 use crate::{BLOCKS_PER_REGION, NbtString, nbt::Block, region::Region};
 
+/// A shorthand type for `Result<T, silverfish::Error>`
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Show the [`std::fmt::Display`] of the error to display even further context & info

@@ -1,6 +1,6 @@
 //! `set` handles all functions related to pushing blocks to the [`Region`]'s internal block buffer.  
 
-use crate::{BiomeCell, Block, ChunkData, NbtString, Region, Result};
+use crate::{BiomeCell, Block, CHUNK_OP, ChunkData, NbtString, Region, Result};
 use ahash::AHashMap;
 use std::ops::Range;
 
@@ -18,10 +18,13 @@ impl Region {
     /// To actually write the changes to the `chunks`, call [`Region::write_blocks`]
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::{Region, Block};
+    /// # let mut region = Region::default();
     /// let _ = region.set_block(5, 97, 385, Block::new("dirt"))?;
     /// // and to actually write the changes to the NBT
     /// region.write_blocks()?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn set_block<B: Into<Block>>(
         &mut self,
@@ -34,8 +37,14 @@ impl Region {
             (x / ChunkData::WIDTH as u32) as u8,
             (z / ChunkData::WIDTH as u32) as u8,
         );
-        let mut chunk_data = self.get_mut_chunk(chunk_x, chunk_z)?;
-        chunk_data.set_block(x, y, z, block)
+        let mut chunk_data = self.get_chunk_mut(chunk_x, chunk_z)?;
+        // convert the coordinates into chunk local
+        chunk_data.set_block(
+            x & CHUNK_OP as u32,
+            y, // we skip Y until writing since it gets only divided into sections then
+            z & CHUNK_OP as u32,
+            block,
+        )
     }
 
     /// Biomes in Minecraft are stored in 4x4x4 cells within each section.  
@@ -51,10 +60,12 @@ impl Region {
     /// Alternatively, you can just give it the coordinates directly since `(u32, i32, u32)` implements `Into<BiomeCell>`
     ///
     /// ## Example
-    /// ```no_run
-    /// let _ = region.set_biome(((5, 19), 6, (2, 3)), "minecraft:cherry_grove")?;
+    /// ```
+    /// # let mut region = silverfish::Region::default();
+    /// let _ = region.set_biome(((5, 19), 6, (2, 1, 3)), "minecraft:cherry_grove")?;
     /// // to actually write the biomes to the NBT
     /// region.write_biomes()?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn set_biome<C: Into<BiomeCell>, B: Into<NbtString>>(
         &mut self,
@@ -64,7 +75,7 @@ impl Region {
         let cell: BiomeCell = cell.into();
         let biome: NbtString = biome.into();
 
-        let mut chunk_data = self.get_mut_chunk(cell.chunk.0, cell.chunk.1)?;
+        let mut chunk_data = self.get_chunk_mut(cell.chunk.0, cell.chunk.1)?;
         chunk_data.set_biome(cell, biome)
     }
 
@@ -76,9 +87,11 @@ impl Region {
     /// Useful if you know which areas in your region that you'll modify.
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut region = Region::full_empty((0, 0));
+    /// ```
+    /// # use silverfish::Region;
+    /// # let mut region = Region::default();
     /// region.allocate_block_buffer(0..16, 4..8, 1..3, 1024)?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn allocate_block_buffer(
         &mut self,
@@ -89,7 +102,7 @@ impl Region {
     ) -> Result<()> {
         for x in chunks_x {
             for z in chunk_z.clone() {
-                let mut chunk = self.get_mut_chunk(x, z)?;
+                let mut chunk = self.get_chunk_mut(x, z)?;
 
                 let mut map = AHashMap::new();
                 for y in sections.clone() {
@@ -111,9 +124,11 @@ impl Region {
     /// Useful if you know which areas in your region that you'll modify.
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut region = Region::full_empty((0, 0));
+    /// ```
+    /// # use silverfish::Region;
+    /// # let mut region = Region::default();
     /// region.allocate_block_buffer(0..16, 4..8, 1..3, 32)?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn allocate_biome_buffer(
         &mut self,
@@ -124,7 +139,7 @@ impl Region {
     ) -> Result<()> {
         for x in chunks_x {
             for z in chunk_z.clone() {
-                let mut chunk = self.get_mut_chunk(x, z)?;
+                let mut chunk = self.get_chunk_mut(x, z)?;
 
                 let mut map = AHashMap::new();
                 for y in sections.clone() {
@@ -146,7 +161,7 @@ mod test {
 
     #[test]
     fn pre_set_block() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region
             .set_block(1, 2, 3, Block::try_new("minecraft:red_stained_glass")?)?
             .unwrap();
@@ -166,7 +181,7 @@ mod test {
 
     #[test]
     fn set_duplicate_block() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region
             .set_block(52, -5, 395, Block::try_new("minecraft:red_stained_glass")?)?
             .unwrap();
@@ -192,7 +207,7 @@ mod test {
 
     #[test]
     fn set_block() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region
             .set_block(6, 52, 95, Block::try_new("minecraft:oak_planks")?)?
             .unwrap();

@@ -1,25 +1,31 @@
-//! `biome` contains all biome related implementations and functions.  
-//! Since the block system is the main focus of this crate,
-//! i've just stuffed all biome specific code into this module.  
+//! `biome` contains small random functions related to biomes.  
+//! As well as the biome's related structures.  
 
 use crate::{BLOCKS_PER_REGION, BlockWithCoordinate, CHUNK_OP, ChunkData, NbtString};
+use ahash::AHashMap;
+
 #[cfg(test)]
 use crate::{Region, Result};
-use ahash::AHashMap;
 
 /// Contains the necessarily information to locate an exact biome cell within a [`Region`](crate::Region).  
 ///
 /// Biomes in Minecraft at the lowest size is `4x4x4`, so this specifies the `chunk`, `section` & `cell` within the section.  
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BiomeCell {
+    /// The chunk coordinates
     pub chunk: (u8, u8),
+    /// Which section within the chunk
     pub section: i8,
+    /// The cell coordinate within the section
     pub cell: (u8, u8, u8),
 }
 
+/// A [`BiomeCell`] but with a biome id attached to it.  
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BiomeCellWithId {
+    /// The biome cell
     pub cell: BiomeCell,
+    /// It's attached biome ID
     pub id: NbtString,
 }
 
@@ -30,7 +36,8 @@ impl BiomeCell {
     /// Creates a new [`BiomeCell`] from the required data.  
     ///
     /// ## Example
-    /// ```no_run
+    /// ```
+    /// # use silverfish::BiomeCell;
     /// let cell = BiomeCell::new((4, 1), -1, (1, 1, 3));
     /// ```
     pub fn new(chunk: (u8, u8), section: i8, cell: (u8, u8, u8)) -> Self {
@@ -144,7 +151,7 @@ mod test {
 
     #[test]
     fn pre_set_biome() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region
             .set_biome((5, 17, 148), "minecraft:cherry_grove")?
             .unwrap();
@@ -164,7 +171,7 @@ mod test {
 
     #[test]
     fn set_duplicate_biome() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region
             .set_biome((248, -42, 21), "minecraft:desert")?
             .unwrap();
@@ -189,7 +196,7 @@ mod test {
 
     #[test]
     fn write_biome() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region
             .set_biome(((0, 0), 4, (0, 0, 1)), "minecraft:swamp")?
             .unwrap();
@@ -205,7 +212,7 @@ mod test {
 
     #[test]
     fn get_biomes() -> Result<()> {
-        let region = Region::full_empty((0, 0));
+        let region = Region::default();
         let biomes = region.get_biomes(vec![(5, 71, 41), (61, 95, 13), (11, 42, 283)])?;
         assert_eq!(biomes.len(), 3);
         assert!(biomes.iter().all(|b| b.id == "minecraft:plains"));
@@ -215,7 +222,7 @@ mod test {
 
     #[test]
     fn get_biome() -> Result<()> {
-        let region = Region::full_empty((0, 0));
+        let region = Region::default();
         let biome = region.get_biome(BiomeCell::new((5, 1), 8, (1, 2, 3)))?;
         assert_eq!(biome, "minecraft:plains");
 
@@ -224,7 +231,7 @@ mod test {
 
     #[test]
     fn set_all_biome_cells() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region.allocate_biome_buffer(0..32, 0..32, -4..20, 64)?;
         for cx in 0..32 {
             for sy in -4..20 {
@@ -261,7 +268,7 @@ mod test {
     #[test]
     #[should_panic]
     fn invalid_get_coords() {
-        let region = Region::full_empty((0, 0));
+        let region = Region::default();
         region.get_biome((852, 14, 5212)).unwrap();
     }
 

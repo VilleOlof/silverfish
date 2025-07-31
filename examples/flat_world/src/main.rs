@@ -2,7 +2,7 @@ use silverfish::{BLOCKS_PER_REGION, Region, Result};
 use std::fs::File;
 
 pub fn main() -> Result<()> {
-    let mut region = Region::full_empty((0, 0));
+    let mut region = Region::default();
 
     for x in 0..BLOCKS_PER_REGION {
         for z in 0..BLOCKS_PER_REGION {

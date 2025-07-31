@@ -1,8 +1,6 @@
 //! `write` handles all functions related to actually writing the [`Region`]'s internal block buffer
 //! to it's chunks within the [`Region`], handles batching, encoding/decoding section data, etc.  
 
-use std::sync::Arc;
-
 use crate::{
     BiomeCell, Block, CHUNK_OP, Config, Error, NbtString, Region, Result,
     chunk::ChunkData,
@@ -12,6 +10,7 @@ use crate::{
 use ahash::AHashMap;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use simdnbt::owned::{NbtCompound, NbtList};
+use std::sync::Arc;
 
 impl Region {
     pub(crate) const BLOCK_DATA_LEN: usize = ChunkData::WIDTH.pow(3);
@@ -23,7 +22,7 @@ impl Region {
     pub fn write_blocks(&mut self) -> Result<()> {
         self.chunks.par_iter_mut().try_for_each(|mut ref_mut| {
             let coords = *ref_mut.key();
-            ref_mut.write_blocks(coords, &self.config)
+            ref_mut.write_blocks(coords, &self.get_config())
         })?;
 
         Ok(())
@@ -46,9 +45,11 @@ impl Region {
     /// Writes the changes directly to the NBT.  
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut region = Region::full_empty((0, 0));
+    /// ```
+    /// # use silverfish::Region;
+    /// # let mut region = Region::default();
     /// region.set_section((13, 15), 1, "minecraft:stone")?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn set_section<B: Into<Block>>(
         &mut self,
@@ -68,9 +69,11 @@ impl Region {
     /// Argument tuple is: `((chunk_x, chunk_z), section_y, block)`
     ///
     /// ## Example
-    /// ```no_run
-    /// let mut region = Region::full_empty((0, 0));
+    /// ```
+    /// # use silverfish::Region;
+    /// # let mut region = Region::default();
     /// region.set_sections(vec![((5, 12), 6, "dirt"), ((14, 5), -1, "stone")])?;
+    /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn set_sections<B: Into<Block>>(&mut self, sections: Vec<((u8, u8), i8, B)>) -> Result<()> {
         sections
@@ -87,8 +90,8 @@ impl Region {
                 );
 
                 // again, this part is just copied but hard to extrapolate
-                let update_lighting = self.config.update_lighting;
-                let mut chunk_data = self.get_mut_chunk(chunk_coords.0, chunk_coords.1)?;
+                let update_lighting = self.get_config().update_lighting;
+                let mut chunk_data = self.get_chunk_mut(chunk_coords.0, chunk_coords.1)?;
                 let nbt = Arc::get_mut(&mut chunk_data.nbt)
                     .ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
 
@@ -135,7 +138,7 @@ impl Region {
                     })?
                     .ok_or(Error::MissingNbtTag("couldn't find section"))?;
 
-                if self.config.update_lighting {
+                if self.get_config().update_lighting {
                     section.remove("BlockLight");
                     section.remove("SkyLight");
                 }
@@ -313,9 +316,9 @@ impl ChunkData {
                 };
 
                 let (x, y, z) = (
-                    block.coordinates.0 & CHUNK_OP as u32,
-                    block.coordinates.1 & CHUNK_OP as i32,
-                    block.coordinates.2 & CHUNK_OP as u32,
+                    block.coordinates.0,
+                    block.coordinates.1 & CHUNK_OP, // divide Y into section here
+                    block.coordinates.2,
                 );
                 let index = (x
                     + z * ChunkData::WIDTH as u32
@@ -472,7 +475,7 @@ mod test {
 
     #[test]
     fn set_section() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         region.set_section(
             (0, 0),
             2,
@@ -489,7 +492,7 @@ mod test {
 
     #[test]
     fn full_region_set_section() -> Result<()> {
-        let mut region = Region::full_empty((0, 0));
+        let mut region = Region::default();
         let mut sections = Vec::with_capacity(24_576);
         let block = Block::try_new(Name::new_namespace("minecraft:water"))?;
 

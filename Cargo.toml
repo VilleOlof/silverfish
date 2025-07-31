@@ -19,9 +19,6 @@ ahash = "0.8"
 dashmap = { version = "6.1.0", features = ["rayon"] }
 rayon = "1.10"
 
-[lib]
-doctest = false
-
 [dev-dependencies]
 criterion = "0.3"
 

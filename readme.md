@@ -1,6 +1,6 @@
 # silverfish
 
-![Silverfish Logo](./logo.webp)
+![Silverfish Logo](https://bimply.lifelike.dev/d/E98zDHtEKO)
 
 Easily edit Minecraft worlds with a simple, fast and powerful API.  
 Works with worlds from version **1.18+** (including modded worlds).  
@@ -25,7 +25,7 @@ But instead write it to an internal buffer that also prevents duplicate blocks.
 To actually flush the block changes to the chunks, call `Region::write_blocks`
 
 
-```rust
+```rust ,no_run
 use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
@@ -34,6 +34,8 @@ region.set_block(42, 65, 84, "stone")?;
 region.write_blocks()?;
 let mut buf = vec![];
 region.write(&mut buf)?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 ### Get block
@@ -42,12 +44,14 @@ You can retrieve blocks in batches or single call.
 Use `Region::get_blocks` with a list of coordinates to batch them together.  
 
 
-```rust
+```rust ,no_run
 use silverfish::Region;
 
-let mut region_buf = vec![];
+let mut region_buf = std::io::Cursor::new(vec![]);
 let region = Region::from_region(&mut region_buf, (0, 0))?;
 let block = region.get_block(42, 65, 84)?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 ### Biomes
@@ -62,21 +66,25 @@ So to set a cell to a specific biome you have to specify:
 Or you can just call it with tuple: `(52, 12, 62)` with region local coordinates.  
 As it implements `Into<BiomeCell>` and will convert it for you.  
 
-```rust
+```rust ,no_run
 // Set a biome cell
 use silverfish::{Region, BiomeCell};
 
 let mut region = Region::full_empty((0, 0));
 region.set_biome(BiomeCell::new((4, 1), -1, (1, 1, 3)), "minecraft:plains")?;
 region.write_biomes()?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
-```rust
+```rust ,no_run
 // Get a biome cell
 use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
 let biome = region.get_biome((61, 12, 284))?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 ### Block properties
@@ -84,13 +92,15 @@ let biome = region.get_biome((61, 12, 284))?;
 Blocks can have any property attached to them.  
 The `Block` comes with both `new` & `new_with_props` and a `try` version that returns a result.  
 
-```rust
+```rust ,no_run
 use silverfish::Block;
 
 let block = Block::try_new_with_props(
     "minecraft:sea_pickle", 
     &[("waterlogged", "true"), ("pickles", "3")]
 )?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 Look futher down under `performance` for more information on block names and their namespaces.  
@@ -101,7 +111,7 @@ A `Region` is the main object you will work with to apply changes and read data.
 And can be constructed via 4 different methods.  
 Note that the last argument for any `Region` constructor is the region coordinates.  
 
-```rust
+```rust ,ignore
 use silverfish::Region;
 
 // A new empty region with no chunk data
@@ -125,15 +135,16 @@ The most notable one is `update_lighting` which structures the chunks in so that
 Minecraft will automatically update the lighting in the chunks on first reload.  
 *(which is set to true by default)*
 
-```rust
+```rust ,no_run
 use silverfish::{Config, Region};
 
 let mut region = Region::full_empty((0, 0));
-let config = Config {
-    create_chunk_if_missing: false
-    update_lighting: true,
-};
-region.config = config;
+
+let mut config = Config::default();
+config.update_lighting = false;
+region.set_config(config)?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 ----
@@ -156,9 +167,13 @@ When you construct a `Block`, you may notice that the id argument you give is `B
 a namespace or not. A namespace is the `minecraft:` part of an id (`minecraft:furnace`, for example).  
 And if you know that your block has a namespace in it you can safetely construct a `Name` with a namespace.  
 
-```rust
+```rust ,no_run
+use silverfish::{Block, Name};
+
 let name = Name::new_namespace("minecraft:bell");
 let block = Block::try_new(name)?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 Namespaces are not strictly *required* but heavily recommended incase  
@@ -173,11 +188,13 @@ that you will modify, it helps to preallocate those internal buffers.
 Since calling `region.set_block(...)` doesn't actually write the changes.  
 We store the blocks in internal buffers until `region.write_blocks` is called.  
 
-```rust
+```rust ,no_run
+use silverfish::Region;
+
 let mut region = Region::full_empty((0, 0));
 // preallocates the first 16 chunks within the region
 region.allocate_block_buffer(0..4, 0..4, -4..20, 4096);
-region.set_block((6, 1, 7), "birch_planks");
+region.set_block(6, 1, 7, "birch_planks");
 // ...
 ```
 
@@ -195,7 +212,9 @@ Almost all operations you do can be made in batches internally.
 Let's say you're writing a ton of blocks.
 
 #### set_block: Single calls, slow
-```rust
+```rust ,no_run
+use silverfish::{Region, Error};
+
 let mut region = Region::full_empty((0, 0));
 region.set_block(5, 1, 28, "air");
 region.write_blocks()?;
@@ -203,33 +222,47 @@ region.set_block(71, -5, 14, "air");
 region.write_blocks()?;
 region.set_block(451, 51, 162, "air");
 region.write_blocks()?;
+
+Ok::<(), silverfish::Error>(())
 ```
 #### set_block: Batched, fast
-```rust
+```rust ,no_run
+use silverfish::Region;
+
 let mut region = Region::full_empty((0, 0));
 region.set_block(5, 1, 28, "air");
 region.set_block(71, -5, 14, "air");
 region.set_block(451, 51, 162, "air");
 region.write_blocks()?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 This can also be applied to getting a ton of blocks at the same time.  
 
 #### get_block: Single calls, slow
-```rust
+```rust ,no_run
+use silverfish::Region;
+
 let region = Region::full_empty((0, 0));
 let block_1 = region.get_block(6, 1, 4)?;
 let block_2 = region.get_block(1, -61, 52)?;
 let block_3 = region.get_block(78, 13, 152)?;
 let block_4 = region.get_block(4, 62, 84)?;
+
+Ok::<(), silverfish::Error>(())
 ```
 #### get_blocks: Batched, fast
-```rust
+```rust ,no_run
+use silverfish::Region;
+
 let region = Region::full_empty((0, 0));
-let blocks = region.get_blocks(vec![
+let blocks = region.get_blocks(&vec![
     (6, 1, 4), (1, -61, 52),
     (78, 13, 152), (4, 62, 84)
 ])?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 ### Parallel set block
@@ -244,20 +277,22 @@ and placing a furnace at `0, 0, 0` in each chunk.
 `region.write_blocks()?` is already parallel internally,  
 So no need to try and call it within the `par_iter`.  
 
-```rust
+```rust ,no_run
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use silverfish::{Region, Error};
+use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
 
 (0..32).collect::<Vec<u8>>().par_iter().try_for_each(|z| {
-    let mut chunk = region.get_mut_chunk(0, *z)?;
-    chunk.set_block(0, 0, (z*16), "furnace").unwrap();
+    let mut chunk = region.get_chunk_mut(0, *z)?;
+    chunk.set_block(0, 0, 0, "furnace").unwrap();
 
-    Ok::<(), Error>(())
+    Ok::<(), silverfish::Error>(())
 })?;
 
 region.write_blocks()?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 ### Set Sections
@@ -267,7 +302,9 @@ It is over 10x times faster to do it via `region.set_sections`.
 This function and it's brother (`set_section`), allows you to set an entire  
 section *(4096 blocks, 16\*16\*16)* to a single block at once.  
 
-```rust
+```rust ,no_run
+use silverfish::Region;
+
 let mut region = Region::full_empty((0, 0));
 let mut sections = Vec::with_capacity(24_576);
 for x in 0..32 {
@@ -278,6 +315,8 @@ for x in 0..32 {
     }
 }
 region.set_sections(sections)?;
+
+Ok::<(), silverfish::Error>(())
 ```
 
 Look at the [Minecraft Wiki](https://minecraft.wiki/w/Chunk_format) for more information on how sections are structured.  

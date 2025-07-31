@@ -12,7 +12,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function("full_region", |b| {
         b.iter(|| {
-            let mut region = Region::full_empty((0, 0));
+            let mut region = Region::default();
             region
                 .allocate_block_buffer(0..32, 0..32, -4..20, 4096)
                 .unwrap();
@@ -28,7 +28,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let chunk_x = x as u8 / 16;
                 let chunk_z = z as u8 / 16;
 
-                let mut chunk = region.get_mut_chunk(chunk_x, chunk_z).unwrap();
+                let mut chunk = region.get_chunk_mut(chunk_x, chunk_z).unwrap();
 
                 chunk
                     .set_block(

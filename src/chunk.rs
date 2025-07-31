@@ -2,9 +2,7 @@
 //! [`ChunkData`] is a wrapper for the actual chunk nbt and some attached data
 //! to keep track of pending blocks and biomes and what blocks/biomes we've seen before.  
 
-use crate::{
-    BiomeCell, Block, BlockWithCoordinate, CHUNK_OP, NbtString, Result, biome::BiomeCellWithId,
-};
+use crate::{BiomeCell, Block, BlockWithCoordinate, NbtString, Result, biome::BiomeCellWithId};
 use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
 use simdnbt::owned::NbtCompound;
@@ -12,7 +10,7 @@ use std::{ops::RangeInclusive, sync::Arc};
 
 /// A chunk within a region and it's attached data to track pending blocks.  
 ///
-/// Provides some lower level set functions that [`Region`] uses.  
+/// Provides some lower level set functions that [`Region`](crate::Region) uses.  
 #[derive(Clone)]
 pub struct ChunkData {
     /// The chunks actual NBT data  
@@ -43,15 +41,10 @@ impl ChunkData {
     /// Also how wide/tall a single section is.  
     pub(crate) const WIDTH: usize = 16;
 
-    /// Set a block at the specified coordinates *(local to within the region and this chunk)*.  
+    /// Set a block at the specified coordinates *(local to within the chunk)*.  
     ///
     /// In most cases you'd want to use [`Region::set_block`](crate::Region::set_block) instead since that picks  
     /// the right chunk and handles it for you.  
-    ///
-    /// But if you have a [`ChunkData`] and know that these coordinates are within
-    /// this specific chunk then go ahead and use this.  
-    ///
-    /// But be careful.  
     pub fn set_block<B: Into<Block>>(
         &mut self,
         x: u32,
@@ -59,6 +52,8 @@ impl ChunkData {
         z: u32,
         block: B,
     ) -> Result<Option<()>> {
+        assert!(x < ChunkData::WIDTH as u32 && z < ChunkData::WIDTH as u32);
+
         let index = self.get_block_index(x, y, z);
         if !self.seen_blocks.contains(index) {
             self.seen_blocks.insert(index);
@@ -113,9 +108,9 @@ impl ChunkData {
     /// Returns the [`FixedBitSet`] index for these coordinates.  
     pub(crate) fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
         let y_offset = (y as isize - self.world_height.start()) as usize;
-        (x & CHUNK_OP as u32) as usize
+        x as usize
             + y_offset * ChunkData::WIDTH
-            + (z & CHUNK_OP as u32) as usize
+            + z as usize
                 * ChunkData::WIDTH
                 * (self.world_height.end() - -self.world_height.start()) as usize
     }
