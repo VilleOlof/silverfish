@@ -331,11 +331,13 @@ While these are pointless in real world examples.
 They are *fun*. 
 
 On my machine (Ryzen 7 5800X) and in release mode.  
-Have gotten a throughput of **92,509,569** blocks per second when writing to the chunks NBT.  
-*(1,006,632,960 b/s if doing one block per section via `set_sections`)*  
+Have gotten a throughput of **162,360,154** blocks per second when writing to the chunks NBT.  
+*(1,290,555,076 b/s if doing one block per section via `set_sections`)*  
 
 The scenario was writing *100,663,296* blocks (an entire region) that only contained the same block.  
 So this got the maximum amount of palette caches hit and least clean up internally.  
 This was also with the entire region preallocated within the internal buffers.  
 And didn't use `set_section` or `set_sections` which is faster in real world use.  
-Those 100 million or so blocks took *900ms~* or so to flush from the buffers to NBT.  
+Those 100 million or so blocks took *650ms~* or so to flush from the buffers to NBT. 
+
+Even if real world examples are slower, it is quite fast enough for 99% of people.  
