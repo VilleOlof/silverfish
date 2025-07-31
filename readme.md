@@ -1,6 +1,6 @@
 # silverfish
 
-![Silverfish Logo](https://bimply.lifelike.dev/d/E98zDHtEKO)
+![Silverfish Logo](https://bimply.lifelike.dev/d/qjlzVoyc9H)
 
 Easily edit Minecraft worlds with a simple, fast and powerful API.  
 Works with worlds from version **1.18+** (including modded worlds).  
