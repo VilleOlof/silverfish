@@ -33,6 +33,11 @@ pub struct ChunkData {
     pub(crate) pending_biomes: AHashMap<i8, Vec<BiomeCellWithId>>,
     /// A check of what blocks has been seen before in `pending_biomes`
     pub(crate) seen_biomes: FixedBitSet,
+
+    /// If this is unmarked, the block write logic will skip this one.  
+    pub(crate) dirty_blocks: bool,
+    /// If this is unmarked, the biome write logic will skip this one.  
+    pub(crate) dirt_biomes: bool,
 }
 
 impl ChunkData {
@@ -67,6 +72,7 @@ impl ChunkData {
                     coordinates: (x, y, z),
                     block: block.into(),
                 });
+            self.dirty_blocks = true;
 
             return Ok(Some(()));
         }
@@ -99,6 +105,8 @@ impl ChunkData {
                 .entry(cell.section)
                 .or_insert_with(|| Vec::with_capacity((BiomeCell::CELL_SIZE.pow(3)) as usize))
                 .push(BiomeCellWithId { cell, id: biome });
+            self.dirt_biomes = true;
+
             return Ok(Some(()));
         }
 
@@ -172,6 +180,8 @@ impl ChunkData {
             pending_biomes: AHashMap::new(),
             seen_blocks: ChunkData::block_bitset(world_height_count),
             seen_biomes: ChunkData::biome_bitset(world_height_count),
+            dirty_blocks: false,
+            dirt_biomes: false,
         }
     }
 }

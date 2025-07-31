@@ -49,11 +49,9 @@ fn main() -> Result<()> {
     //     let chunk_x = x as u8 / 16;
     //     let chunk_z = z as u8 / 16;
 
-    //     let mut chunk = region.get_mut_chunk(chunk_x, chunk_z).unwrap();
+    //     let mut chunk = region.get_chunk_mut(chunk_x, chunk_z).unwrap();
 
-    //     chunk
-    //         .set_block(x as u32, y, z as u32, block.clone())
-    //         .unwrap();
+    //     chunk.set_block(x & 15, y, z & 15, block.clone()).unwrap();
     // });
 
     // println!("took {:?} to loop, writing...", loop_instant.elapsed());

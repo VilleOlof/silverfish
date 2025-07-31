@@ -504,11 +504,20 @@ mod test {
     }
 
     #[test]
-    fn data_bit_count() {
+    fn block_bit_count() {
         assert_eq!(get_block_bit_count(0), 4);
         assert_eq!(get_block_bit_count(58), 6);
         assert_eq!(get_block_bit_count(1754), 11);
         assert_eq!(get_block_bit_count(8572728), 13);
+    }
+
+    #[test]
+    fn biome_bit_count() {
+        assert_eq!(get_biome_bit_count(0), 0);
+        assert_eq!(get_biome_bit_count(4), 2);
+        assert_eq!(get_biome_bit_count(7), 3);
+        assert_eq!(get_biome_bit_count(25), 5);
+        assert_eq!(get_biome_bit_count(8572728), 6);
     }
 
     #[test]

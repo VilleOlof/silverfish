@@ -20,10 +20,13 @@ impl Region {
     ///
     /// This function writes all the chunks within the region in parallel.    
     pub fn write_blocks(&mut self) -> Result<()> {
-        self.chunks.par_iter_mut().try_for_each(|mut ref_mut| {
-            let coords = *ref_mut.key();
-            ref_mut.write_blocks(coords, &self.get_config())
-        })?;
+        self.chunks
+            .par_iter_mut()
+            .filter(|c| c.dirty_blocks)
+            .try_for_each(|mut ref_mut| {
+                let coords = *ref_mut.key();
+                ref_mut.write_blocks(coords, &self.get_config())
+            })?;
 
         Ok(())
     }
@@ -32,10 +35,13 @@ impl Region {
     ///
     /// This function writes all the chunks within the region in parallel.    
     pub fn write_biomes(&mut self) -> Result<()> {
-        self.chunks.par_iter_mut().try_for_each(|mut ref_mut| {
-            let coords = *ref_mut.key();
-            ref_mut.write_biomes(coords)
-        })?;
+        self.chunks
+            .par_iter_mut()
+            .filter(|c| c.dirt_biomes)
+            .try_for_each(|mut ref_mut| {
+                let coords = *ref_mut.key();
+                ref_mut.write_biomes(coords)
+            })?;
 
         Ok(())
     }
@@ -367,6 +373,8 @@ impl ChunkData {
 
         // we could to a per block unset of each incase this fails mid point it "could" be ran again
         self.seen_blocks.clear();
+        // unmark it as dirt after processing
+        self.dirty_blocks = false;
 
         Ok::<(), Error>(())
     }
@@ -461,6 +469,7 @@ impl ChunkData {
         }
 
         self.seen_biomes.clear();
+        self.dirt_biomes = false;
 
         Ok(())
     }
