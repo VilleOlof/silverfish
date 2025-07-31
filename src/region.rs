@@ -3,14 +3,13 @@
 //! Contains functions for constructing a [`Region`] and writing itself to a specified buffer.  
 
 use crate::{
+    BLOCKS_PER_REGION,
     chunk::ChunkData,
     config::Config,
     error::{Error, Result},
     nbt::Block,
 };
 use ahash::AHashMap;
-#[cfg(test)]
-use dashmap::mapref::one::Ref;
 use dashmap::{DashMap, mapref::one::RefMut};
 use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
@@ -20,6 +19,9 @@ use std::{
     ops::{Deref, RangeInclusive},
     sync::Arc,
 };
+
+#[cfg(test)]
+use dashmap::mapref::one::Ref;
 
 /// An in-memory region to read and write blocks to the chunks within.  
 #[derive(Clone)]
@@ -46,9 +48,6 @@ impl Region {
     ///
     /// This is due the massive structural changes in how the nbt is stored that was introduced in `21w39a` & `21w43a`
     pub const MIN_DATA_VERSION: i32 = 2860;
-
-    // some constants for the FixedBitSet & indexes
-    pub(crate) const REGION_CHUNK_SIZE: u8 = 32;
 
     /// Updates the world height in the [`Config`].  
     ///
@@ -104,7 +103,10 @@ impl Region {
 
         for x in 0..mca::REGION_SIZE as u8 {
             for z in 0..mca::REGION_SIZE as u8 {
-                chunks.insert((x, z), get_empty_chunk((x, z), region_coords));
+                chunks.insert(
+                    (x, z),
+                    get_empty_chunk((x, z), region_coords, Config::DEFAULT_WORLD_HEIGHT),
+                );
             }
         }
 
@@ -195,7 +197,7 @@ impl Region {
     /// let chunk = region.get_chunk(5, 17)?;
     /// ```
     pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<Arc<NbtCompound>>> {
-        if x >= Self::REGION_CHUNK_SIZE || z >= Self::REGION_CHUNK_SIZE {
+        if x >= mca::REGION_SIZE as u8 || z >= mca::REGION_SIZE as u8 {
             return Err(Error::ChunkOutOfRegionBounds(x, z));
         }
 
@@ -221,7 +223,7 @@ impl Region {
     /// let mut chunk = region.get_mut_chunk(1, 13)?;
     /// ```
     pub fn get_mut_chunk<'a>(&'a self, x: u8, z: u8) -> Result<RefMut<'a, (u8, u8), ChunkData>> {
-        if x >= Self::REGION_CHUNK_SIZE || z >= Self::REGION_CHUNK_SIZE {
+        if x >= mca::REGION_SIZE as u8 || z >= mca::REGION_SIZE as u8 {
             return Err(Error::ChunkOutOfRegionBounds(x, z));
         }
 
@@ -231,7 +233,11 @@ impl Region {
                 self.chunks.insert(
                     (x, z),
                     ChunkData::new(
-                        get_empty_chunk((x, z), self.region_coords),
+                        get_empty_chunk(
+                            (x, z),
+                            self.region_coords,
+                            self.config.world_height.clone(),
+                        ),
                         self.config.world_height.clone(),
                     ),
                 );
@@ -288,10 +294,21 @@ pub(crate) fn get_biome_bit_count(len: usize) -> u32 {
 /// Generates an empty chunk with plains as the default biome and air in all sections  
 ///
 /// DataVersion is defaulted to [`Region::MIN_DATA_VERSION`]
-pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompound {
-    let mut sections: Vec<NbtCompound> = Vec::with_capacity(24);
+pub fn get_empty_chunk(
+    coords: (u8, u8),
+    region_coords: (i32, i32),
+    world_height: RangeInclusive<isize>,
+) -> NbtCompound {
+    let mut sections: Vec<NbtCompound> =
+        Vec::with_capacity(Config::DEFAULT_WORLD_HEIGHT.clone().count() / ChunkData::WIDTH);
+    let (section_start, section_end) = (
+        (world_height.start() / ChunkData::WIDTH as isize) as i8,
+        (world_height.end() / ChunkData::WIDTH as isize) as i8,
+    );
 
-    for y in -4..=19 {
+    // one thing would be to move these to world_height.start / 16 and world_height.end / 16
+    // but would be a bit annoying to move around the data to get world_height into this function.
+    for y in section_start..section_end {
         let biomes = NbtCompound::from_values(vec![(
             "palette".into(),
             NbtTag::List(NbtList::String(vec!["minecraft:plains".into()])),
@@ -322,11 +339,11 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
         ("isLightOn".into(), NbtTag::Byte(0)),
         (
             "xPos".into(),
-            NbtTag::Int((region_coords.0 * 32) + coords.0 as i32),
+            NbtTag::Int((region_coords.0 * mca::REGION_SIZE as i32) + coords.0 as i32),
         ),
         (
             "zPos".into(),
-            NbtTag::Int((region_coords.1 * 32) + coords.1 as i32),
+            NbtTag::Int((region_coords.1 * mca::REGION_SIZE as i32) + coords.1 as i32),
         ),
     ]);
 
@@ -342,7 +359,11 @@ pub fn get_empty_chunk(coords: (u8, u8), region_coords: (i32, i32)) -> NbtCompou
 /// assert_eq!(local_coords, (183, -17, 213))
 /// ```
 pub fn to_region_local(coords: (i32, i32, i32)) -> (u32, i32, u32) {
-    ((coords.0 & 511) as u32, coords.1, (coords.2 & 511) as u32)
+    (
+        (coords.0 & (BLOCKS_PER_REGION - 1) as i32) as u32,
+        coords.1,
+        (coords.2 & (BLOCKS_PER_REGION - 1) as i32) as u32,
+    )
 }
 
 /// Checks the data_version and status of the chunk if it's valid to operate on
@@ -421,7 +442,7 @@ mod test {
 
     #[test]
     fn empty_chunk() -> Result<()> {
-        let chunk = get_empty_chunk((15, 9), (2, -5));
+        let chunk = get_empty_chunk((15, 9), (2, -5), Config::DEFAULT_WORLD_HEIGHT);
         let data_version = chunk
             .int("DataVersion")
             .ok_or(Error::MissingNbtTag("DataVersion"))?;
@@ -474,7 +495,10 @@ mod test {
     #[test]
     fn from_nbt_region() -> Result<()> {
         let mut chunks = AHashMap::new();
-        chunks.insert((4, 8), get_empty_chunk((4, 8), (0, 0)));
+        chunks.insert(
+            (4, 8),
+            get_empty_chunk((4, 8), (0, 0), Config::DEFAULT_WORLD_HEIGHT),
+        );
 
         let region = Region::from_nbt(chunks, (0, 0));
         assert_eq!(region.chunks.len(), 1);
@@ -519,7 +543,10 @@ mod test {
     #[test]
     fn get_chunk() -> Result<()> {
         let mut chunks = AHashMap::new();
-        chunks.insert((9, 1), get_empty_chunk((9, 1), (0, 0)));
+        chunks.insert(
+            (9, 1),
+            get_empty_chunk((9, 1), (0, 0), Config::DEFAULT_WORLD_HEIGHT),
+        );
 
         let region = Region::from_nbt(chunks, (0, 0));
 

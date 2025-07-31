@@ -2,7 +2,7 @@
 //! Since the block system is the main focus of this crate,
 //! i've just stuffed all biome specific code into this module.  
 
-use crate::{BlockWithCoordinate, NbtString};
+use crate::{BLOCKS_PER_REGION, BlockWithCoordinate, CHUNK_OP, ChunkData, NbtString};
 #[cfg(test)]
 use crate::{Region, Result};
 use ahash::AHashMap;
@@ -24,6 +24,7 @@ pub struct BiomeCellWithId {
 }
 
 impl BiomeCell {
+    /// How wide/tall a biome cell is within a section.  
     pub(crate) const CELL_SIZE: u8 = 4;
 
     /// Creates a new [`BiomeCell`] from the required data.  
@@ -34,11 +35,13 @@ impl BiomeCell {
     /// ```
     pub fn new(chunk: (u8, u8), section: i8, cell: (u8, u8, u8)) -> Self {
         assert!(
-            chunk.0 < 32 && chunk.1 < 32,
+            chunk.0 < mca::REGION_SIZE as u8 && chunk.1 < mca::REGION_SIZE as u8,
             "Chunk coordinates for BiomeCell it outside region"
         );
         assert!(
-            cell.0 < 4 && cell.1 < 4 && cell.2 < 4,
+            cell.0 < BiomeCell::CELL_SIZE
+                && cell.1 < BiomeCell::CELL_SIZE
+                && cell.2 < BiomeCell::CELL_SIZE,
             "Biome 'cell' is outside it's section"
         );
 
@@ -54,9 +57,19 @@ impl BiomeCell {
         coordinates_to_biome_cell(x, y, z)
     }
 
-    // TODO
+    /// Converts a [`BiomeCell`] back into it's region local coordinates.  
+    ///
+    /// *Hooks on the cells smallest corner*  
     pub fn to_coordinates(&self) -> (u32, i32, u32) {
-        todo!("hook to like the corner closest to 0,0,0 or whatever it comes up to")
+        let mut x = self.chunk.0 as usize * ChunkData::WIDTH;
+        let mut y = self.section as isize * ChunkData::WIDTH as isize;
+        let mut z = self.chunk.1 as usize * ChunkData::WIDTH;
+
+        x += self.cell.0 as usize * BiomeCell::CELL_SIZE as usize;
+        y += self.cell.1 as isize * BiomeCell::CELL_SIZE as isize;
+        z += self.cell.2 as usize * BiomeCell::CELL_SIZE as usize;
+
+        (x as u32, y as i32, z as u32)
     }
 }
 
@@ -80,17 +93,17 @@ impl Into<BiomeCell> for BlockWithCoordinate {
 
 /// Converts a set of region local coordinates to it's appropriate biome cell.  
 pub fn coordinates_to_biome_cell(x: u32, y: i32, z: u32) -> BiomeCell {
-    assert!(x < 512 && z < 512);
+    assert!(x < BLOCKS_PER_REGION && z < BLOCKS_PER_REGION);
 
     let chunk_coords = (
-        (x as f64 / 16f64).floor() as u8,
-        (z as f64 / 16f64).floor() as u8,
+        (x as f64 / ChunkData::WIDTH as f64).floor() as u8,
+        (z as f64 / ChunkData::WIDTH as f64).floor() as u8,
     );
-    let section = (y as f64 / 16f64).floor() as i8;
+    let section = (y as f64 / ChunkData::WIDTH as f64).floor() as i8;
     let cell_coords = (
-        ((x & 15) / 4) as u8,
-        ((y & 15) / 4) as u8,
-        ((z & 15) / 4) as u8,
+        ((x & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
+        ((y & CHUNK_OP as i32) / BiomeCell::CELL_SIZE as i32) as u8,
+        ((z & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
     );
 
     BiomeCell::new(chunk_coords, section, cell_coords)
@@ -250,5 +263,27 @@ mod test {
     fn invalid_get_coords() {
         let region = Region::full_empty((0, 0));
         region.get_biome((852, 14, 5212)).unwrap();
+    }
+
+    #[test]
+    fn biome_cell_coordinate_from_coordinate() {
+        let cell = BiomeCell::from_coordinates(26, 61, 163);
+        let coordinates = cell.to_coordinates();
+        assert_eq!(coordinates, (24, 60, 160));
+    }
+
+    #[test]
+    fn biome_cell_coordinate_from_cell() {
+        let cell = BiomeCell::new((5, 1), -1, (1, 1, 3));
+        let coordinates = cell.to_coordinates();
+        assert_eq!(coordinates, (84, -12, 28));
+    }
+
+    #[test]
+    fn biome_cell_coordinate_roundtrip() {
+        let cell = BiomeCell::new((7, 1), 4, (2, 3, 1));
+        let coords = cell.to_coordinates();
+        let new_cell = BiomeCell::from_coordinates(coords.0, coords.1, coords.2);
+        assert_eq!(cell, new_cell);
     }
 }

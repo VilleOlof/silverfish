@@ -23,12 +23,15 @@ impl Default for Config {
         Self {
             create_chunk_if_missing: false,
             update_lighting: true,
-            world_height: -64..=320,
+            world_height: Config::DEFAULT_WORLD_HEIGHT,
         }
     }
 }
 
 impl Config {
+    /// The default world height in Minecraft (as of `1.17+ (21w06a)`)
+    pub const DEFAULT_WORLD_HEIGHT: RangeInclusive<isize> = -64..=320;
+
     /// Returns the world_height.  
     ///
     /// **Note:** to mutate world_height you either need to pass it a region first or use [`Config::new`].

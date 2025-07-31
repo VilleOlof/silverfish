@@ -2,7 +2,9 @@
 //! [`ChunkData`] is a wrapper for the actual chunk nbt and some attached data
 //! to keep track of pending blocks and biomes and what blocks/biomes we've seen before.  
 
-use crate::{BiomeCell, Block, BlockWithCoordinate, NbtString, Result, biome::BiomeCellWithId};
+use crate::{
+    BiomeCell, Block, BlockWithCoordinate, CHUNK_OP, NbtString, Result, biome::BiomeCellWithId,
+};
 use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
 use simdnbt::owned::NbtCompound;
@@ -37,7 +39,9 @@ pub struct ChunkData {
 
 impl ChunkData {
     /// How many blocks wide a chunk is.  
-    pub(crate) const BLOCKS_PER_CHUNK: usize = 16;
+    ///
+    /// Also how wide/tall a single section is.  
+    pub(crate) const WIDTH: usize = 16;
 
     /// Set a block at the specified coordinates *(local to within the region and this chunk)*.  
     ///
@@ -59,11 +63,11 @@ impl ChunkData {
         if !self.seen_blocks.contains(index) {
             self.seen_blocks.insert(index);
 
-            let section_y = (y as f64 / 16f64).floor() as i8;
+            let section_y = (y as f64 / ChunkData::WIDTH as f64).floor() as i8;
 
             self.pending_blocks
                 .entry(section_y)
-                .or_insert_with(|| Vec::with_capacity(4096))
+                .or_insert_with(|| Vec::with_capacity(ChunkData::WIDTH.pow(3)))
                 .push(BlockWithCoordinate {
                     coordinates: (x, y, z),
                     block: block.into(),
@@ -98,7 +102,7 @@ impl ChunkData {
 
             self.pending_biomes
                 .entry(cell.section)
-                .or_insert_with(|| Vec::with_capacity(64))
+                .or_insert_with(|| Vec::with_capacity((BiomeCell::CELL_SIZE.pow(3)) as usize))
                 .push(BiomeCellWithId { cell, id: biome });
             return Ok(Some(()));
         }
@@ -109,10 +113,10 @@ impl ChunkData {
     /// Returns the [`FixedBitSet`] index for these coordinates.  
     pub(crate) fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
         let y_offset = (y as isize - self.world_height.start()) as usize;
-        (x & 15) as usize
-            + y_offset * ChunkData::BLOCKS_PER_CHUNK
-            + (z & 15) as usize
-                * ChunkData::BLOCKS_PER_CHUNK
+        (x & CHUNK_OP as u32) as usize
+            + y_offset * ChunkData::WIDTH
+            + (z & CHUNK_OP as u32) as usize
+                * ChunkData::WIDTH
                 * (self.world_height.end() - -self.world_height.start()) as usize
     }
 
@@ -125,7 +129,7 @@ impl ChunkData {
             cell.cell.2 as usize,
         );
 
-        (cell.section - (*self.world_height.start() / 16) as i8) as usize
+        (cell.section - (*self.world_height.start() / ChunkData::WIDTH as isize) as i8) as usize
             * cell_size
             * cell_size
             * cell_size
@@ -136,15 +140,14 @@ impl ChunkData {
 
     /// Returns the [`FixedBitSet`] for seen_biomes
     pub(crate) fn biome_bitset(world_height: usize) -> FixedBitSet {
-        let section_count = world_height / 16;
-        let size = section_count
-            * (BiomeCell::CELL_SIZE * BiomeCell::CELL_SIZE * BiomeCell::CELL_SIZE) as usize;
+        let section_count = world_height / ChunkData::WIDTH;
+        let size = section_count * (BiomeCell::CELL_SIZE.pow(3)) as usize;
         FixedBitSet::with_capacity(size)
     }
 
     /// Returns the [`FixedBitSet`] for seen_blocks
     pub(crate) fn block_bitset(world_height: usize) -> FixedBitSet {
-        let size = ChunkData::BLOCKS_PER_CHUNK * world_height * ChunkData::BLOCKS_PER_CHUNK;
+        let size = ChunkData::WIDTH * world_height * ChunkData::WIDTH;
         FixedBitSet::with_capacity(size)
     }
 

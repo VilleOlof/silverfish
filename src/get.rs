@@ -1,7 +1,8 @@
 //! `get` contains functions related to getting blocks from a [`Region`].  
 
 use crate::{
-    BiomeCell, BiomeCellWithId, Block, Error, NbtString, Region, Result,
+    BiomeCell, BiomeCellWithId, Block, CHUNK_OP, ChunkData, Config, Error, NbtString, Region,
+    Result,
     biome::group_cells_into_chunks,
     data::decode_data,
     region::{BlockWithCoordinate, get_biome_bit_count, get_block_bit_count},
@@ -78,7 +79,9 @@ impl Region {
                 decode_data(&mut indexes, get_block_bit_count(palette.len()), data);
 
                 for (x, y, z) in blocks_to_get {
-                    let index = (x & 15) + ((z & 15) * 16) + ((y & 15) as u32 * 16 * 16);
+                    let index = (x & CHUNK_OP as u32)
+                        + ((z & CHUNK_OP as u32) * ChunkData::WIDTH as u32)
+                        + ((y & CHUNK_OP as i32) as u32 * (ChunkData::WIDTH.pow(2)) as u32);
 
                     let palette_index: usize =
                         *indexes.get(index as usize).ok_or(Error::OutOfBounds {
@@ -206,15 +209,19 @@ fn group_coordinates_into_chunks(blocks: &[(u32, i32, u32)]) -> Vec<GetChunkGrou
 
     for (x, y, z) in blocks {
         let (chunk_x, chunk_z) = (
-            (*x as f64 / 16f64).floor() as u8,
-            (*z as f64 / 16f64).floor() as u8,
+            (*x as f64 / ChunkData::WIDTH as f64).floor() as u8,
+            (*z as f64 / ChunkData::WIDTH as f64).floor() as u8,
         );
-        let section_y = (*y as f64 / 16f64).floor() as i8;
+        let section_y = (*y as f64 / ChunkData::WIDTH as f64).floor() as i8;
 
         map.entry((chunk_x, chunk_z))
-            .or_insert_with(|| AHashMap::with_capacity(24))
+            .or_insert_with(|| {
+                AHashMap::with_capacity(
+                    Config::DEFAULT_WORLD_HEIGHT.clone().count() / ChunkData::WIDTH,
+                )
+            })
             .entry(section_y)
-            .or_insert_with(|| Vec::with_capacity(4096))
+            .or_insert_with(|| Vec::with_capacity(ChunkData::WIDTH.pow(3)))
             .push((*x, *y, *z));
     }
 

@@ -20,7 +20,9 @@ pub use config::Config;
 pub use error::{Error, Result};
 pub use nbt::{Block, Name, NbtString};
 pub use region::{BlockWithCoordinate, Region, get_empty_chunk, to_region_local};
-pub const BLOCKS_PER_REGION: u32 = 512;
+pub const BLOCKS_PER_REGION: u32 = (ChunkData::WIDTH * mca::REGION_SIZE) as u32;
+/// Used in a lot of places for `(num & 15)` since 15 is 1 less than 16 (chunk width).  
+pub(crate) const CHUNK_OP: i32 = (ChunkData::WIDTH - 1) as i32;
 
 // re-export `RefMut` under "dashmap"
 // since it's really the only type from dashmap the user may want

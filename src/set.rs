@@ -1,6 +1,6 @@
 //! `set` handles all functions related to pushing blocks to the [`Region`]'s internal block buffer.  
 
-use crate::{BiomeCell, Block, NbtString, Region, Result};
+use crate::{BiomeCell, Block, ChunkData, NbtString, Region, Result};
 use ahash::AHashMap;
 use std::ops::Range;
 
@@ -30,7 +30,10 @@ impl Region {
         z: u32,
         block: B,
     ) -> Result<Option<()>> {
-        let (chunk_x, chunk_z) = ((x / 16) as u8, (z / 16) as u8);
+        let (chunk_x, chunk_z) = (
+            (x / ChunkData::WIDTH as u32) as u8,
+            (z / ChunkData::WIDTH as u32) as u8,
+        );
         let mut chunk_data = self.get_mut_chunk(chunk_x, chunk_z)?;
         chunk_data.set_block(x, y, z, block)
     }

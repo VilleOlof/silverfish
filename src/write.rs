@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::{
-    BiomeCell, Block, Config, Error, NbtString, Region, Result,
+    BiomeCell, Block, CHUNK_OP, Config, Error, NbtString, Region, Result,
     chunk::ChunkData,
     data::{decode_data, encode_data},
     region::{clean_palette, get_biome_bit_count, get_block_bit_count, is_valid_chunk},
@@ -14,8 +14,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use simdnbt::owned::{NbtCompound, NbtList};
 
 impl Region {
-    pub(crate) const BLOCK_DATA_LEN: usize = 4096;
-    pub(crate) const BIOME_DATA_LEN: usize = 64;
+    pub(crate) const BLOCK_DATA_LEN: usize = ChunkData::WIDTH.pow(3);
+    pub(crate) const BIOME_DATA_LEN: usize = BiomeCell::CELL_SIZE.pow(3) as usize;
 
     /// Takes all pending block writes and applies all the blocks to the actual chunk NBT
     ///
@@ -81,7 +81,10 @@ impl Region {
             .collect::<Vec<((u8, u8), i8, Block)>>()
             .into_par_iter()
             .try_for_each(|(chunk_coords, section_y, block)| {
-                assert!(chunk_coords.0 < 32 && chunk_coords.1 < 32);
+                assert!(
+                    chunk_coords.0 < mca::REGION_SIZE as u8
+                        && chunk_coords.1 < mca::REGION_SIZE as u8
+                );
 
                 // again, this part is just copied but hard to extrapolate
                 let update_lighting = self.config.update_lighting;
@@ -160,20 +163,24 @@ impl Region {
                     let x = block_entities[i]
                         .int("x")
                         .ok_or(Error::MissingNbtTag("x"))?
-                        & 15;
+                        & CHUNK_OP;
                     let y = block_entities[i]
                         .int("y")
                         .ok_or(Error::MissingNbtTag("y"))?
-                        & 15;
+                        & CHUNK_OP;
                     let z = block_entities[i]
                         .int("z")
                         .ok_or(Error::MissingNbtTag("z"))?
-                        & 15;
+                        & CHUNK_OP;
 
                     // check if x y z is within
-                    if (chunk_coords.0..chunk_coords.0 + 16).contains(&(x as u8))
-                        || ((section_y * 16)..(section_y * 16) + 16).contains(&(y as i8))
-                        || (chunk_coords.1..chunk_coords.1 + 16).contains(&(z as u8))
+                    if (chunk_coords.0..chunk_coords.0 + ChunkData::WIDTH as u8)
+                        .contains(&(x as u8))
+                        || ((section_y * ChunkData::WIDTH as i8)
+                            ..(section_y * ChunkData::WIDTH as i8) + ChunkData::WIDTH as i8)
+                            .contains(&(y as i8))
+                        || (chunk_coords.1..chunk_coords.1 + ChunkData::WIDTH as u8)
+                            .contains(&(z as u8))
                     {
                         block_entities.remove(i);
                     }
@@ -233,9 +240,9 @@ impl ChunkData {
 
         // a little cache so we can find the index directly and remove it instead of looking up the coords everytime
         for be in block_entities.iter() {
-            let x = be.int("x").ok_or(Error::MissingNbtTag("x"))? & 15;
-            let y = be.int("y").ok_or(Error::MissingNbtTag("y"))? & 15;
-            let z = be.int("z").ok_or(Error::MissingNbtTag("z"))? & 15;
+            let x = be.int("x").ok_or(Error::MissingNbtTag("x"))? & CHUNK_OP;
+            let y = be.int("y").ok_or(Error::MissingNbtTag("y"))? & CHUNK_OP;
+            let z = be.int("z").ok_or(Error::MissingNbtTag("z"))? & CHUNK_OP;
 
             block_entity_cache.insert((x, y, z), false);
         }
@@ -306,11 +313,14 @@ impl ChunkData {
                 };
 
                 let (x, y, z) = (
-                    block.coordinates.0 & 15,
-                    block.coordinates.1 & 15,
-                    block.coordinates.2 & 15,
+                    block.coordinates.0 & CHUNK_OP as u32,
+                    block.coordinates.1 & CHUNK_OP as i32,
+                    block.coordinates.2 & CHUNK_OP as u32,
                 );
-                let index = (x + z * 16 + y as u32 * 16 * 16) as usize;
+                let index = (x
+                    + z * ChunkData::WIDTH as u32
+                    + y as u32 * ChunkData::WIDTH as u32 * ChunkData::WIDTH as u32)
+                    as usize;
 
                 old_indexes[index] = palette_index;
 
@@ -327,9 +337,9 @@ impl ChunkData {
 
             // remove any marked block entities
             block_entities.retain(|be| {
-                let x = be.int("x").unwrap() & 15;
-                let y = be.int("y").unwrap() & 15;
-                let z = be.int("z").unwrap() & 15;
+                let x = be.int("x").unwrap() & CHUNK_OP;
+                let y = be.int("y").unwrap() & CHUNK_OP;
+                let z = be.int("z").unwrap() & CHUNK_OP;
 
                 match block_entity_cache.get(&(x, y, z)) {
                     Some(delete) if *delete => false,
