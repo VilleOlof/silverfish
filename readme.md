@@ -11,6 +11,12 @@ Even set and get biomes, all in an easy to use crate.
 You can either continue reading the documentation.  
 Or look at some examples in `examples/*`.  
 
+## Usage
+
+```sh
+cargo add silverfish
+```
+
 ### Set block
 
 When calling `Region::set_block`, it won't actually write the changes to the chunks.  
@@ -24,7 +30,7 @@ use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
 // look at `silverfish::Block` for info on blocks
-region.set_block(42, 65, 84, "stone");
+region.set_block(42, 65, 84, "stone")?;
 region.write_blocks()?;
 let mut buf = vec![];
 region.write(&mut buf)?;
@@ -61,7 +67,7 @@ As it implements `Into<BiomeCell>` and will convert it for you.
 use silverfish::{Region, BiomeCell};
 
 let mut region = Region::full_empty((0, 0));
-region.set_biome(BiomeCell::new((4, 1), -1, (1, 1, 3)), "minecraft:plains");
+region.set_biome(BiomeCell::new((4, 1), -1, (1, 1, 3)), "minecraft:plains")?;
 region.write_biomes()?;
 ```
 
@@ -109,7 +115,7 @@ let region = Region::full_empty(...);
 let region = Region::from_nbt(...);
 
 // Creates a region based off a writer from a `.mca` region file format.  
-let region = Region::from_region(...);
+let region = Region::from_region(...)?;
 ```
 
 ### Config
@@ -226,6 +232,34 @@ let blocks = region.get_blocks(vec![
 ])?;
 ```
 
+### Parallel set block
+
+Due to how the internal strructure it set up, it's quite easy to  
+set blocks within the same region in parallel.  
+*(chunks are limited to one "thread" at a time)*
+
+Below is an example using `rayon` to iterate over 32 chunks,  
+and placing a furnace at `0, 0, 0` in each chunk.  
+
+`region.write_blocks()?` is already parallel internally,  
+So no need to try and call it within the `par_iter`.  
+
+```rust
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use silverfish::{Region, Error};
+
+let mut region = Region::full_empty((0, 0));
+
+(0..32).collect::<Vec<u8>>().par_iter().try_for_each(|z| {
+    let mut chunk = region.get_mut_chunk(0, *z)?;
+    chunk.set_block(0, 0, (z*16), "furnace").unwrap();
+
+    Ok::<(), Error>(())
+})?;
+
+region.write_blocks()?;
+```
+
 ### Set Sections
 
 If you know that you will fill, let's say an entire region with a single block.  
@@ -258,10 +292,11 @@ While these are pointless in real world examples.
 They are *fun*. 
 
 On my machine (Ryzen 7 5800X) and in release mode.  
-Have gotten a throughput of **10,168,009** blocks per second when writing to the chunks NBT.  
+Have gotten a throughput of **92,509,569** blocks per second when writing to the chunks NBT.  
+*(1,006,632,960 b/s if doing one block per section via `set_sections`)*  
 
 The scenario was writing *100,663,296* blocks (an entire region) that only contained the same block.  
 So this got the maximum amount of palette caches hit and least clean up internally.  
 This was also with the entire region preallocated within the internal buffers.  
 And didn't use `set_section` or `set_sections` which is faster in real world use.  
-Those 100 million or so blocks took *9s~* or so to flush from the buffers to NBT.  
+Those 100 million or so blocks took *900ms~* or so to flush from the buffers to NBT.  

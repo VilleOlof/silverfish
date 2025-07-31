@@ -45,4 +45,6 @@ pub enum Error {
     NotInBlockPalette(Block),
     #[error("No palette that matches {0:?}")]
     NotInBiomePalette(NbtString),
+    #[error("Tried to take ownership of an Arc that has multiple strong references: {0}")]
+    TriedToAccessArc(&'static str),
 }

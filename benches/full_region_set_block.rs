@@ -1,31 +1,44 @@
 use std::time::Duration;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use silverfish::{Block, Region};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use silverfish::{Block, Name, Region};
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_region");
     group
         .sample_size(10)
-        .measurement_time(Duration::from_secs(600)); // 10 minutes or so, this is a juicy one
+        .measurement_time(Duration::from_secs(60));
 
     group.bench_function("full_region", |b| {
         b.iter(|| {
             let mut region = Region::full_empty((0, 0));
-            region.allocate_block_buffer(0..32, 0..32, -4..20, 4096);
+            region
+                .allocate_block_buffer(0..32, 0..32, -4..20, 4096)
+                .unwrap();
 
-            for x in 0..512 {
-                for y in -64i32..320i32 {
-                    for z in 0..512 {
-                        region.set_block(
-                            black_box(x),
-                            black_box(y),
-                            black_box(z),
-                            black_box(Block::new("white_concrete")),
-                        );
-                    }
-                }
-            }
+            let block: Block = Name::Namespaced("minecraft:white_concrete".into()).into();
+            (0..(512 * 384 * 512)).into_par_iter().for_each(|index| {
+                let x = index / (384 * 512);
+                let rem = index % (384 * 512);
+                let y = rem / 512;
+                let z = rem % 512;
+
+                let y = y as i32 - 64;
+                let chunk_x = x as u8 / 16;
+                let chunk_z = z as u8 / 16;
+
+                let mut chunk = region.get_mut_chunk(chunk_x, chunk_z).unwrap();
+
+                chunk
+                    .set_block(
+                        black_box(x as u32),
+                        black_box(y),
+                        black_box(z as u32),
+                        black_box(block.clone()),
+                    )
+                    .unwrap();
+            });
 
             region.write_blocks().unwrap();
         })

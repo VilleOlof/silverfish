@@ -3,43 +3,33 @@
 //! Contains functions for constructing a [`Region`] and writing itself to a specified buffer.  
 
 use crate::{
-    biome::BiomeCellWithId,
+    chunk::ChunkData,
     config::Config,
     error::{Error, Result},
     nbt::Block,
 };
 use ahash::AHashMap;
-use fixedbitset::FixedBitSet;
+#[cfg(test)]
+use dashmap::mapref::one::Ref;
+use dashmap::{DashMap, mapref::one::RefMut};
 use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
     fmt::Debug,
     io::{Cursor, Read, Write},
     ops::{Deref, RangeInclusive},
+    sync::Arc,
 };
-
-pub(crate) type BlockBuffer = AHashMap<(u8, u8), AHashMap<i8, Vec<BlockWithCoordinate>>>;
-pub(crate) type BiomeBuffer = AHashMap<(u8, u8), AHashMap<i8, Vec<BiomeCellWithId>>>;
 
 /// An in-memory region to read and write blocks to the chunks within.  
 #[derive(Clone)]
 pub struct Region {
     /// The chunks within the Region, mapped to their coordinates
-    pub chunks: AHashMap<(u8, u8), NbtCompound>,
+    pub chunks: DashMap<(u8, u8), ChunkData>,
     /// Config on how it should handle certain scenarios
     pub config: Config,
     /// Coordinates for this specific region
     pub region_coords: (i32, i32),
-
-    /// buffered blocks that is about to be written to `chunks`
-    pub(crate) pending_blocks: BlockBuffer,
-    /// blocks we've already pushed to `pending_blocks` to avoid duplicate coordinate blocks
-    pub(crate) seen_blocks: FixedBitSet,
-
-    /// buffered biomes that is about to be written to `chunks`
-    pub(crate) pending_biomes: BiomeBuffer,
-    /// biomes we've already pushed to `pending_biomes` to avoid duplicate biome cells
-    pub(crate) seen_biomes: FixedBitSet,
 }
 
 /// Just a [`Block`] but with a set of coordinates attached to them.  
@@ -74,10 +64,22 @@ impl Region {
     /// let mut region = Region::full_empty((0, 0));
     /// region.set_world_height(128..=320);
     /// ```
-    pub fn set_world_height(&mut self, range: RangeInclusive<isize>) {
-        self.seen_biomes = Self::get_default_biome_bitset(range.clone());
-        self.pending_biomes.clear(); // need to reset because we reset bitset
+    pub fn set_world_height(&mut self, range: RangeInclusive<isize>) -> Result<()> {
+        // clear all the chunks buffers
+        let world_height_count = range.clone().count();
+        for x in 0..32 {
+            for z in 0..32 {
+                let mut chunk = self.get_mut_chunk(x, z)?;
+                chunk.pending_blocks = AHashMap::new();
+                chunk.pending_biomes = AHashMap::new();
+                chunk.seen_blocks = ChunkData::block_bitset(world_height_count);
+                chunk.seen_biomes = ChunkData::biome_bitset(world_height_count);
+            }
+        }
+
         self.config.world_height = range;
+
+        Ok(())
     }
 
     /// Creates an empty [`Region`] with no chunks or anything.  
@@ -90,11 +92,7 @@ impl Region {
         };
 
         Self {
-            chunks: AHashMap::new(),
-            seen_blocks: Self::get_default_block_bitset(&config),
-            seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
-            pending_blocks: AHashMap::new(),
-            pending_biomes: AHashMap::new(),
+            chunks: DashMap::new(),
             region_coords,
             config,
         }
@@ -117,12 +115,13 @@ impl Region {
     pub fn from_nbt(chunks: AHashMap<(u8, u8), NbtCompound>, region_coords: (i32, i32)) -> Self {
         let config = Config::default();
 
+        let chunks = chunks
+            .into_iter()
+            .map(|(k, v)| (k, ChunkData::new(v, config.world_height.clone())))
+            .collect();
+
         Self {
             chunks,
-            seen_blocks: Self::get_default_block_bitset(&config),
-            seen_biomes: Self::get_default_biome_bitset(config.world_height.clone()),
-            pending_blocks: AHashMap::new(),
-            pending_biomes: AHashMap::new(),
             region_coords,
             config,
         }
@@ -135,8 +134,7 @@ impl Region {
     /// let mut region = Region::from_region(&mut File::open("r.0.0.mca")?)?;
     /// ```
     pub fn from_region<R: Read>(reader: &mut R, region_coords: (i32, i32)) -> Result<Self> {
-        // TODO could look at an average region and with_capacity on that?
-        let mut bytes = vec![];
+        let mut bytes = Vec::with_capacity(4_000_000); // 4000 KB, just an average start on the vec to skip a few common re-allocations
         reader.read_to_end(&mut bytes)?;
         let region_reader = RegionReader::new(&bytes)?;
 
@@ -173,9 +171,12 @@ impl Region {
     pub fn write<W: Write>(self, writer: &mut W) -> Result<()> {
         let mut region_writer = RegionWriter::new();
 
-        for ((x, z), chunk_nbt) in self.chunks {
+        for ((x, z), chunk_data) in self.chunks {
             let mut raw_nbt = vec![];
-            let wrapped = Nbt::Some(BaseNbt::new("", chunk_nbt));
+            let wrapped = Nbt::Some(BaseNbt::new(
+                "",
+                Arc::into_inner(chunk_data.nbt).ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?,
+            ));
             wrapped.write(&mut raw_nbt);
             region_writer.push_chunk_with_compression(&raw_nbt, (x, z), CompressionType::Zlib)?;
         }
@@ -193,12 +194,51 @@ impl Region {
     /// ```no_run
     /// let chunk = region.get_chunk(5, 17)?;
     /// ```
-    pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<&NbtCompound>> {
+    pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<Arc<NbtCompound>>> {
         if x >= Self::REGION_CHUNK_SIZE || z >= Self::REGION_CHUNK_SIZE {
             return Err(Error::ChunkOutOfRegionBounds(x, z));
         }
 
+        Ok(self.chunks.get(&(x, z)).map(|c| Arc::clone(&c.nbt)))
+    }
+
+    /// Returns the raw [`ChunkData`].  
+    #[cfg(test)]
+    pub(crate) fn get_raw_chunk(
+        &self,
+        x: u8,
+        z: u8,
+    ) -> Result<Option<Ref<'_, (u8, u8), ChunkData>>> {
         Ok(self.chunks.get(&(x, z)))
+    }
+
+    /// Returns a mutable reference to a chunk entry within the region.  
+    ///
+    /// Do note that these chunk coordinates are local to within the region itself.
+    ///
+    /// ## Example
+    /// ```no_run
+    /// let mut chunk = region.get_mut_chunk(1, 13)?;
+    /// ```
+    pub fn get_mut_chunk<'a>(&'a self, x: u8, z: u8) -> Result<RefMut<'a, (u8, u8), ChunkData>> {
+        if x >= Self::REGION_CHUNK_SIZE || z >= Self::REGION_CHUNK_SIZE {
+            return Err(Error::ChunkOutOfRegionBounds(x, z));
+        }
+
+        match self.chunks.get_mut(&(x, z)) {
+            Some(ch) => return Ok(ch),
+            None if self.config.create_chunk_if_missing => {
+                self.chunks.insert(
+                    (x, z),
+                    ChunkData::new(
+                        get_empty_chunk((x, z), self.region_coords),
+                        self.config.world_height.clone(),
+                    ),
+                );
+                return Ok(self.chunks.get_mut(&(x, z)).unwrap());
+            }
+            None => return Err(Error::TriedToModifyMissingChunk(x, z)),
+        };
     }
 }
 
@@ -206,11 +246,10 @@ impl Debug for Region {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Region({}, {})\n  > chunks: {}\n  > buffered blocks: {}\n  > {:?}",
+            "Region({}, {})\n  > chunks: {}\n  > {:?}",
             self.region_coords.0,
             self.region_coords.1,
             self.chunks.len(),
-            self.pending_blocks.len(),
             self.config
         )
     }
@@ -219,7 +258,7 @@ impl Debug for Region {
 // returns the bit count for whatever palette_len.
 // we dont actually need to calculate anything fancy
 // palette_len cant be more than 4096 so we can pre set it up
-pub(crate) fn get_bit_count(len: usize) -> u32 {
+pub(crate) fn get_block_bit_count(len: usize) -> u32 {
     match len {
         0..=16 => 4, // i believe this should be 0..=16 since the old math had a .max(4) at the end, thus always getting 4 at the minimum
         17..=32 => 5,
@@ -231,6 +270,18 @@ pub(crate) fn get_bit_count(len: usize) -> u32 {
         1025..=2048 => 11,
         2049..=4096 => 12,
         _ => 13,
+    }
+}
+
+pub(crate) fn get_biome_bit_count(len: usize) -> u32 {
+    match len {
+        0 | 1 => 0,
+        2 => 1,
+        3 | 4 => 2,
+        5..=8 => 3,
+        9..=16 => 4,
+        17..=32 => 5,
+        _ => 6,
     }
 }
 
@@ -392,19 +443,19 @@ mod test {
 
     #[test]
     fn data_bit_count() {
-        assert_eq!(get_bit_count(0), 4);
-        assert_eq!(get_bit_count(58), 6);
-        assert_eq!(get_bit_count(1754), 11);
-        assert_eq!(get_bit_count(8572728), 13);
+        assert_eq!(get_block_bit_count(0), 4);
+        assert_eq!(get_block_bit_count(58), 6);
+        assert_eq!(get_block_bit_count(1754), 11);
+        assert_eq!(get_block_bit_count(8572728), 13);
     }
 
     #[test]
-    fn empty_region() {
+    fn empty_region() -> Result<()> {
         let region = Region::empty((0, 0));
         assert_eq!(region.chunks.len(), 0);
-        assert_eq!(region.pending_blocks.len(), 0);
-        assert_eq!(region.seen_blocks.count_ones(..), 0);
+        assert_eq!(region.get_chunk(0, 0)?, None);
         assert_eq!(region.region_coords, (0, 0));
+        Ok(())
     }
 
     #[test]
@@ -421,15 +472,24 @@ mod test {
     }
 
     #[test]
-    fn from_nbt_region() {
+    fn from_nbt_region() -> Result<()> {
         let mut chunks = AHashMap::new();
         chunks.insert((4, 8), get_empty_chunk((4, 8), (0, 0)));
 
         let region = Region::from_nbt(chunks, (0, 0));
         assert_eq!(region.chunks.len(), 1);
-        assert_eq!(region.pending_blocks.len(), 0);
-        assert_eq!(region.seen_blocks.count_ones(..), 0);
+        assert_eq!(region.get_raw_chunk(4, 8)?.unwrap().pending_blocks.len(), 0);
+        assert_eq!(
+            region
+                .get_raw_chunk(4, 8)?
+                .unwrap()
+                .seen_blocks
+                .count_ones(..),
+            0
+        );
         assert_eq!(region.region_coords, (0, 0));
+
+        Ok(())
     }
 
     const TEST_REGION: &[u8] = include_bytes!("../tests/full_region.mca");

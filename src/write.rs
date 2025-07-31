@@ -1,208 +1,42 @@
 //! `write` handles all functions related to actually writing the [`Region`]'s internal block buffer
 //! to it's chunks within the [`Region`], handles batching, encoding/decoding section data, etc.  
 
+use std::sync::Arc;
+
 use crate::{
-    Block, Error, Region, Result,
+    BiomeCell, Block, Config, Error, NbtString, Region, Result,
+    chunk::ChunkData,
     data::{decode_data, encode_data},
-    get_empty_chunk,
-    region::{clean_palette, get_bit_count, is_valid_chunk},
+    region::{clean_palette, get_biome_bit_count, get_block_bit_count, is_valid_chunk},
 };
 use ahash::AHashMap;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use simdnbt::owned::{NbtCompound, NbtList};
 
 impl Region {
     pub(crate) const BLOCK_DATA_LEN: usize = 4096;
+    pub(crate) const BIOME_DATA_LEN: usize = 64;
 
     /// Takes all pending block writes and applies all the blocks to the actual chunk NBT
     ///
-    /// Clears the internal buffered blocks instantly.  
-    /// So if this function fails, do note that any blocks sent in via [`Self::set_block`] will get cleared.  
+    /// This function writes all the chunks within the region in parallel.    
     pub fn write_blocks(&mut self) -> Result<()> {
-        // reset seen_blocks already here since we consume pending_blocks
-        self.seen_blocks.clear();
+        self.chunks.par_iter_mut().try_for_each(|mut ref_mut| {
+            let coords = *ref_mut.key();
+            ref_mut.write_blocks(coords, &self.config)
+        })?;
 
-        // we keep these here since we re-use these to hold onto their memory allocations.
-        let mut old_indexes: [i64; Region::BLOCK_DATA_LEN] = [0; Region::BLOCK_DATA_LEN];
-        let mut cached_palette_indexes: AHashMap<Block, i64> = AHashMap::with_capacity(4);
-        let mut block_entity_cache: AHashMap<(i32, i32, i32), bool> = AHashMap::new();
+        Ok(())
+    }
 
-        // theres probably some way to convert this into a rayon par_iter or something
-        // so this can be heavily faster, the only annoying thing is since this is all mutable reference to self.chunks
-        // we cant Mutex: Self or self.chunks and lock because the entire "thread" needs to use a mutable ref constantly
-        for (chunk_coords, section_map) in self.pending_blocks.iter_mut() {
-            let chunk = match self.chunks.get_mut(&chunk_coords) {
-                Some(chunk) => chunk,
-                None if self.config.create_chunk_if_missing => {
-                    self.chunks.insert(
-                        *chunk_coords,
-                        get_empty_chunk(*chunk_coords, self.region_coords),
-                    );
-                    self.chunks
-                        .get_mut(&chunk_coords)
-                        .ok_or(Error::NoChunk(chunk_coords.0, chunk_coords.1))?
-                }
-                None => {
-                    return Err(Error::TriedToModifyMissingChunk(
-                        chunk_coords.0,
-                        chunk_coords.1,
-                    ));
-                }
-            };
-
-            is_valid_chunk(&chunk, *chunk_coords)?;
-
-            // clear heightmaps if they exist since they can become outdated after this
-            if let Some(height_maps) = chunk.compound_mut("Heightmaps") {
-                height_maps.clear();
-            };
-
-            if self.config.update_lighting {
-                *chunk
-                    .byte_mut("isLightOn")
-                    .ok_or(Error::MissingNbtTag("isLightOn"))? = 0;
-            }
-
-            // we do a little bit of unsafe :tf:
-            let chunk_ptr = chunk as *mut NbtCompound;
-            let sections: &mut Vec<NbtCompound> = unsafe {
-                match (*chunk_ptr)
-                    .list_mut("sections")
-                    .ok_or(Error::MissingNbtTag("sections"))?
-                {
-                    NbtList::Compound(c) => c,
-                    _ => return Err(Error::InvalidNbtList("sections")),
-                }
-            };
-
-            let block_entities: &mut Vec<NbtCompound> = unsafe {
-                match (*chunk_ptr)
-                    .list_mut("block_entities")
-                    .ok_or(Error::MissingNbtTag("block_entities"))?
-                {
-                    NbtList::Compound(c) => c,
-                    NbtList::Empty => &mut vec![],
-                    _ => return Err(Error::InvalidNbtList("block_entities")),
-                }
-            };
-            // a little cache so we can find the index directly and remove it instead of looking up the coords everytime
-
-            for be in block_entities.iter() {
-                let x = be.int("x").ok_or(Error::MissingNbtTag("x"))? & 15;
-                let y = be.int("y").ok_or(Error::MissingNbtTag("y"))? & 15;
-                let z = be.int("z").ok_or(Error::MissingNbtTag("z"))? & 15;
-
-                block_entity_cache.insert((x, y, z), false);
-            }
-
-            for section in sections.iter_mut() {
-                let y = section.byte("Y").ok_or(Error::MissingNbtTag("Y"))?;
-                let pending_blocks = match section_map.remove(&y) {
-                    Some(pending_blocks) => pending_blocks,
-                    None => continue,
-                };
-
-                if self.config.update_lighting {
-                    section.remove("BlockLight");
-                    section.remove("SkyLight");
-                }
-
-                let state = section
-                    .compound_mut("block_states")
-                    .ok_or(Error::MissingNbtTag("block_states"))?;
-
-                // more unsafe :D
-                let state_ptr = state as *mut NbtCompound;
-                let palette = unsafe {
-                    match (*state_ptr)
-                        .list_mut("palette")
-                        .ok_or(Error::MissingNbtTag("palette"))?
-                    {
-                        NbtList::Compound(c) => c,
-                        _ => return Err(Error::InvalidNbtList("palette")),
-                    }
-                };
-                let data = unsafe { (*state_ptr).long_array("data") };
-
-                let data_len = decode_data(&mut old_indexes, get_bit_count(palette.len()), data);
-
-                // this *should* check for bad files
-                for idx in old_indexes.iter_mut() {
-                    if *idx < 0 || *idx >= palette.len() as i64 {
-                        return Err(Error::InvalidPaletteIndex(*idx));
-                    }
-                }
-
-                for block in pending_blocks {
-                    // micro perf thing would be to keep track of "unique blocks"
-                    // and if its just 1 unique block for this entire .write_blocks()
-                    // we dont need to do any of this pretty much
-                    // and if its a set of like 1-3 blocks, a vec would prob be faster than ahashmap.
-                    // anyhow, this cached_palette_index and keeping track of the indexes
-                    // is the slowest part of write_blocks(), like the hashing, getting etc.
-                    let palette_index = match cached_palette_indexes.get(&block.block) {
-                        Some(idx) => *idx,
-                        None => {
-                            // we just try to find the pos directly, and if there is a pos, goood
-                            // otherwise we can push and use the last index directly
-                            let palette_index = palette.iter().position(|c| &block.block == c);
-                            if let Some(palette_index) = palette_index {
-                                cached_palette_indexes.insert(block.block, palette_index as i64);
-                                palette_index as i64
-                            } else {
-                                let block_nbt = block.block.clone().to_compound()?;
-                                // if we push we already know its the last current index
-                                let palette_index = palette.len() as i64;
-                                palette.push(block_nbt);
-                                cached_palette_indexes.insert(block.block, palette_index);
-                                palette_index
-                            }
-                        }
-                    };
-
-                    let (x, y, z) = (
-                        block.coordinates.0 & 15,
-                        block.coordinates.1 & 15,
-                        block.coordinates.2 & 15,
-                    );
-                    let index = (x + z * 16 + y as u32 * 16 * 16) as usize;
-
-                    old_indexes[index] = palette_index;
-
-                    // if block entity at these coords, mark for deletion
-                    match block_entity_cache.get_mut(&(x as i32, y, z as i32)) {
-                        Some(be) => *be = true,
-                        None => (),
-                    };
-                }
-
-                cached_palette_indexes.clear();
-
-                clean_palette(&mut old_indexes, data_len, palette);
-
-                // remove any marked block entities
-                block_entities.retain(|be| {
-                    let x = be.int("x").unwrap() & 15;
-                    let y = be.int("y").unwrap() & 15;
-                    let z = be.int("z").unwrap() & 15;
-
-                    match block_entity_cache.get(&(x, y, z)) {
-                        Some(delete) if *delete => false,
-                        _ => true,
-                    }
-                });
-                block_entity_cache.clear();
-
-                if palette.len() == 1 {
-                    // if theres only 1 palette we can remove the data
-                    state.remove("data");
-                    continue;
-                }
-
-                encode_data(get_bit_count(palette.len()), &old_indexes, data_len, state);
-            }
-        }
-
-        self.pending_blocks.clear();
+    /// Takes all pending biomes changes and writes them to the chunk NBT
+    ///
+    /// This function writes all the chunks within the region in parallel.    
+    pub fn write_biomes(&mut self) -> Result<()> {
+        self.chunks.par_iter_mut().try_for_each(|mut ref_mut| {
+            let coords = *ref_mut.key();
+            ref_mut.write_biomes(coords)
+        })?;
 
         Ok(())
     }
@@ -231,78 +65,189 @@ impl Region {
     ///
     /// Writes the changes directly to the NBT.  
     ///
+    /// Argument tuple is: `((chunk_x, chunk_z), section_y, block)`
+    ///
     /// ## Example
     /// ```no_run
     /// let mut region = Region::full_empty((0, 0));
     /// region.set_sections(vec![((5, 12), 6, "dirt"), ((14, 5), -1, "stone")])?;
     /// ```
     pub fn set_sections<B: Into<Block>>(&mut self, sections: Vec<((u8, u8), i8, B)>) -> Result<()> {
-        for (chunk_coords, section_y, block) in sections {
-            assert!(chunk_coords.0 < 32 && chunk_coords.1 < 32);
+        sections
+            .into_iter()
+            // we have to map because of block and it's into
+            // rayon doesnt like it otherwise
+            .map(|(cc, sy, b)| (cc, sy, b.into()))
+            .collect::<Vec<((u8, u8), i8, Block)>>()
+            .into_par_iter()
+            .try_for_each(|(chunk_coords, section_y, block)| {
+                assert!(chunk_coords.0 < 32 && chunk_coords.1 < 32);
 
-            // again, this part is just copied but hard to extrapolate
-            let chunk = match self.chunks.get_mut(&chunk_coords) {
-                Some(chunk) => chunk,
-                None if self.config.create_chunk_if_missing => {
-                    self.chunks.insert(
-                        chunk_coords,
-                        get_empty_chunk(chunk_coords, self.region_coords),
-                    );
-                    self.chunks
-                        .get_mut(&chunk_coords)
-                        .ok_or(Error::NoChunk(chunk_coords.0, chunk_coords.1))?
+                // again, this part is just copied but hard to extrapolate
+                let update_lighting = self.config.update_lighting;
+                let mut chunk_data = self.get_mut_chunk(chunk_coords.0, chunk_coords.1)?;
+                let nbt = Arc::get_mut(&mut chunk_data.nbt)
+                    .ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
+
+                is_valid_chunk(&nbt, chunk_coords)?;
+
+                // clear heightmaps if they exist since they can become outdated after this
+                if let Some(height_maps) = nbt.compound_mut("Heightmaps") {
+                    height_maps.clear();
+                };
+
+                if update_lighting {
+                    *nbt.byte_mut("isLightOn")
+                        .ok_or(Error::MissingNbtTag("isLightOn"))? = 0;
                 }
-                None => {
-                    return Err(Error::TriedToModifyMissingChunk(
-                        chunk_coords.0,
-                        chunk_coords.1,
-                    ));
+
+                let chunk_ptr = nbt as *mut NbtCompound;
+                let sections: &mut Vec<NbtCompound> = unsafe {
+                    match (*chunk_ptr)
+                        .list_mut("sections")
+                        .ok_or(Error::MissingNbtTag("sections"))?
+                    {
+                        NbtList::Compound(c) => c,
+                        _ => return Err(Error::InvalidNbtList("sections")),
+                    }
+                };
+
+                let block_entities: &mut Vec<NbtCompound> = unsafe {
+                    match (*chunk_ptr)
+                        .list_mut("block_entities")
+                        .ok_or(Error::MissingNbtTag("block_entities"))?
+                    {
+                        NbtList::Compound(c) => c,
+                        NbtList::Empty => &mut vec![],
+                        _ => return Err(Error::InvalidNbtList("block_entities")),
+                    }
+                };
+
+                let section = sections
+                    .iter_mut()
+                    .try_find(|s| {
+                        Ok::<bool, Error>(
+                            s.byte("Y").ok_or(Error::MissingNbtTag("Y"))? == section_y,
+                        )
+                    })?
+                    .ok_or(Error::MissingNbtTag("couldn't find section"))?;
+
+                if self.config.update_lighting {
+                    section.remove("BlockLight");
+                    section.remove("SkyLight");
                 }
-            };
 
-            is_valid_chunk(&chunk, chunk_coords)?;
+                let state = section
+                    .compound_mut("block_states")
+                    .ok_or(Error::MissingNbtTag("block_states"))?;
 
-            // clear heightmaps if they exist since they can become outdated after this
-            if let Some(height_maps) = chunk.compound_mut("Heightmaps") {
-                height_maps.clear();
-            };
+                // when setting a single section, remove its data field and make sure
+                // the palette only has a single block inside it
+                state.remove("data");
+                let palette = match state.list_mut("palette").unwrap() {
+                    NbtList::Compound(c) => c,
+                    _ => return Err(Error::InvalidNbtList("palette")),
+                };
 
-            if self.config.update_lighting {
-                *chunk
-                    .byte_mut("isLightOn")
-                    .ok_or(Error::MissingNbtTag("isLightOn"))? = 0;
+                palette.clear();
+                palette.push(block.to_compound()?);
+
+                assert_eq!(palette.len(), 1);
+
+                // TODO most block entity things doesnt have tests for them
+                // and im unsure if this actually works since i suck at math :)
+                for i in 0..block_entities.len() {
+                    let x = block_entities[i]
+                        .int("x")
+                        .ok_or(Error::MissingNbtTag("x"))?
+                        & 15;
+                    let y = block_entities[i]
+                        .int("y")
+                        .ok_or(Error::MissingNbtTag("y"))?
+                        & 15;
+                    let z = block_entities[i]
+                        .int("z")
+                        .ok_or(Error::MissingNbtTag("z"))?
+                        & 15;
+
+                    // check if x y z is within
+                    if (chunk_coords.0..chunk_coords.0 + 16).contains(&(x as u8))
+                        || ((section_y * 16)..(section_y * 16) + 16).contains(&(y as i8))
+                        || (chunk_coords.1..chunk_coords.1 + 16).contains(&(z as u8))
+                    {
+                        block_entities.remove(i);
+                    }
+                }
+
+                Ok::<(), Error>(())
+            })?;
+
+        Ok(())
+    }
+}
+
+impl ChunkData {
+    /// Writes the pending changes to the current chunk NBT
+    pub fn write_blocks(&mut self, chunk_coords: (u8, u8), config: &Config) -> Result<()> {
+        // we keep these here since we re-use these to hold onto their memory allocations.
+        let mut old_indexes: [i64; Region::BLOCK_DATA_LEN] = [0; Region::BLOCK_DATA_LEN];
+        let mut cached_palette_indexes: AHashMap<Block, i64> = AHashMap::with_capacity(4);
+        let mut block_entity_cache: AHashMap<(i32, i32, i32), bool> = AHashMap::new();
+
+        //  missing chunk etc is set via /set_block since pending is in chunks
+        let nbt = Arc::get_mut(&mut self.nbt).ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
+        is_valid_chunk(&nbt, chunk_coords)?;
+
+        // clear heightmaps if they exist since they can become outdated after this
+        if let Some(height_maps) = nbt.compound_mut("Heightmaps") {
+            height_maps.clear();
+        };
+
+        if config.update_lighting {
+            *nbt.byte_mut("isLightOn")
+                .ok_or(Error::MissingNbtTag("isLightOn"))? = 0;
+        }
+
+        // we do a little bit of unsafe :tf:
+        let chunk_ptr = nbt as *mut NbtCompound;
+        let sections: &mut Vec<NbtCompound> = unsafe {
+            match (*chunk_ptr)
+                .list_mut("sections")
+                .ok_or(Error::MissingNbtTag("sections"))?
+            {
+                NbtList::Compound(c) => c,
+                _ => return Err(Error::InvalidNbtList("sections")),
             }
+        };
 
-            let chunk_ptr = chunk as *mut NbtCompound;
-            let sections: &mut Vec<NbtCompound> = unsafe {
-                match (*chunk_ptr)
-                    .list_mut("sections")
-                    .ok_or(Error::MissingNbtTag("sections"))?
-                {
-                    NbtList::Compound(c) => c,
-                    _ => return Err(Error::InvalidNbtList("sections")),
-                }
+        let block_entities: &mut Vec<NbtCompound> = unsafe {
+            match (*chunk_ptr)
+                .list_mut("block_entities")
+                .ok_or(Error::MissingNbtTag("block_entities"))?
+            {
+                NbtList::Compound(c) => c,
+                NbtList::Empty => &mut vec![],
+                _ => return Err(Error::InvalidNbtList("block_entities")),
+            }
+        };
+
+        // a little cache so we can find the index directly and remove it instead of looking up the coords everytime
+        for be in block_entities.iter() {
+            let x = be.int("x").ok_or(Error::MissingNbtTag("x"))? & 15;
+            let y = be.int("y").ok_or(Error::MissingNbtTag("y"))? & 15;
+            let z = be.int("z").ok_or(Error::MissingNbtTag("z"))? & 15;
+
+            block_entity_cache.insert((x, y, z), false);
+        }
+
+        for section in sections.iter_mut() {
+            let y = section.byte("Y").ok_or(Error::MissingNbtTag("Y"))?;
+            let pending_blocks = match self.pending_blocks.remove(&y) {
+                Some(pending_blocks) => pending_blocks,
+                None => continue,
             };
 
-            let block_entities: &mut Vec<NbtCompound> = unsafe {
-                match (*chunk_ptr)
-                    .list_mut("block_entities")
-                    .ok_or(Error::MissingNbtTag("block_entities"))?
-                {
-                    NbtList::Compound(c) => c,
-                    NbtList::Empty => &mut vec![],
-                    _ => return Err(Error::InvalidNbtList("block_entities")),
-                }
-            };
-
-            let section = sections
-                .iter_mut()
-                .try_find(|s| {
-                    Ok::<bool, Error>(s.byte("Y").ok_or(Error::MissingNbtTag("Y"))? == section_y)
-                })?
-                .ok_or(Error::MissingNbtTag("couldn't find section"))?;
-
-            if self.config.update_lighting {
+            if config.update_lighting {
                 section.remove("BlockLight");
                 section.remove("SkyLight");
             }
@@ -311,45 +256,198 @@ impl Region {
                 .compound_mut("block_states")
                 .ok_or(Error::MissingNbtTag("block_states"))?;
 
-            // when setting a single section, remove its data field and make sure
-            // the palette only has a single block inside it
-            state.remove("data");
-            let palette = match state.list_mut("palette").unwrap() {
-                NbtList::Compound(c) => c,
-                _ => return Err(Error::InvalidNbtList("palette")),
-            };
-
-            palette.clear();
-            let block: Block = block.into();
-            palette.push(block.to_compound()?);
-
-            assert_eq!(palette.len(), 1);
-
-            // TODO most block entity things doesnt have tests for them
-            // and im unsure if this actually works since i suck at math :)
-            for i in 0..block_entities.len() {
-                let x = block_entities[i]
-                    .int("x")
-                    .ok_or(Error::MissingNbtTag("x"))?
-                    & 15;
-                let y = block_entities[i]
-                    .int("y")
-                    .ok_or(Error::MissingNbtTag("y"))?
-                    & 15;
-                let z = block_entities[i]
-                    .int("z")
-                    .ok_or(Error::MissingNbtTag("z"))?
-                    & 15;
-
-                // check if x y z is within
-                if (chunk_coords.0..chunk_coords.0 + 16).contains(&(x as u8))
-                    || ((section_y * 16)..(section_y * 16) + 16).contains(&(y as i8))
-                    || (chunk_coords.1..chunk_coords.1 + 16).contains(&(z as u8))
+            // more unsafe :D
+            let state_ptr = state as *mut NbtCompound;
+            let palette = unsafe {
+                match (*state_ptr)
+                    .list_mut("palette")
+                    .ok_or(Error::MissingNbtTag("palette"))?
                 {
-                    block_entities.remove(i);
+                    NbtList::Compound(c) => c,
+                    _ => return Err(Error::InvalidNbtList("palette")),
+                }
+            };
+            let data = unsafe { (*state_ptr).long_array("data") };
+
+            let data_len = decode_data(&mut old_indexes, get_block_bit_count(palette.len()), data);
+
+            // this *should* check for bad files
+            for idx in old_indexes.iter_mut() {
+                if *idx < 0 || *idx >= palette.len() as i64 {
+                    return Err(Error::InvalidPaletteIndex(*idx));
                 }
             }
+
+            for block in pending_blocks {
+                // micro perf thing would be to keep track of "unique blocks"
+                // and if its just 1 unique block for this entire .write_blocks()
+                // we dont need to do any of this pretty much
+                // and if its a set of like 1-3 blocks, a vec would prob be faster than ahashmap.
+                // anyhow, this cached_palette_index and keeping track of the indexes
+                // is the slowest part of write_blocks(), like the hashing, getting etc.
+                let palette_index = match cached_palette_indexes.get(&block.block) {
+                    Some(idx) => *idx,
+                    None => {
+                        // we just try to find the pos directly, and if there is a pos, goood
+                        // otherwise we can push and use the last index directly
+                        let palette_index = palette.iter().position(|c| &block.block == c);
+                        if let Some(palette_index) = palette_index {
+                            cached_palette_indexes.insert(block.block, palette_index as i64);
+                            palette_index as i64
+                        } else {
+                            let block_nbt = block.block.clone().to_compound()?;
+                            // if we push we already know its the last current index
+                            let palette_index = palette.len() as i64;
+                            palette.push(block_nbt);
+                            cached_palette_indexes.insert(block.block, palette_index);
+                            palette_index
+                        }
+                    }
+                };
+
+                let (x, y, z) = (
+                    block.coordinates.0 & 15,
+                    block.coordinates.1 & 15,
+                    block.coordinates.2 & 15,
+                );
+                let index = (x + z * 16 + y as u32 * 16 * 16) as usize;
+
+                old_indexes[index] = palette_index;
+
+                // if block entity at these coords, mark for deletion
+                match block_entity_cache.get_mut(&(x as i32, y, z as i32)) {
+                    Some(be) => *be = true,
+                    None => (),
+                };
+            }
+
+            cached_palette_indexes.clear();
+
+            clean_palette(&mut old_indexes, data_len, palette);
+
+            // remove any marked block entities
+            block_entities.retain(|be| {
+                let x = be.int("x").unwrap() & 15;
+                let y = be.int("y").unwrap() & 15;
+                let z = be.int("z").unwrap() & 15;
+
+                match block_entity_cache.get(&(x, y, z)) {
+                    Some(delete) if *delete => false,
+                    _ => true,
+                }
+            });
+            block_entity_cache.clear();
+
+            if palette.len() == 1 {
+                // if theres only 1 palette we can remove the data
+                state.remove("data");
+                continue;
+            }
+
+            encode_data(
+                get_block_bit_count(palette.len()),
+                &old_indexes,
+                data_len,
+                state,
+            );
         }
+
+        // we could to a per block unset of each incase this fails mid point it "could" be ran again
+        self.seen_blocks.clear();
+
+        Ok::<(), Error>(())
+    }
+
+    /// Writes the pending changes to the current chunk NBT
+    pub fn write_biomes(&mut self, chunk_coords: (u8, u8)) -> Result<()> {
+        // keep these here to hold onto their memory allocations.
+        let mut old_indexes: [i64; Region::BIOME_DATA_LEN] = [0; Region::BIOME_DATA_LEN];
+        let mut cached_palette_indexes: AHashMap<NbtString, i64> = AHashMap::new();
+
+        let nbt = Arc::get_mut(&mut self.nbt).ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
+        is_valid_chunk(&nbt, chunk_coords)?;
+
+        let sections: &mut Vec<NbtCompound> = match nbt
+            .list_mut("sections")
+            .ok_or(Error::MissingNbtTag("sections"))?
+        {
+            NbtList::Compound(c) => c,
+            _ => return Err(Error::InvalidNbtList("sections")),
+        };
+
+        for section in sections {
+            let y = section.byte("Y").ok_or(Error::MissingNbtTag("Y"))?;
+            let pending_biomes = match self.pending_biomes.remove(&y) {
+                Some(pending_biomes) => pending_biomes,
+                None => continue,
+            };
+
+            cached_palette_indexes.clear();
+
+            let state = section
+                .compound_mut("biomes")
+                .ok_or(Error::MissingNbtTag("biomes"))?;
+
+            let state_ptr = state as *mut NbtCompound;
+            let palette = unsafe {
+                match (*state_ptr)
+                    .list_mut("palette")
+                    .ok_or(Error::MissingNbtTag("palette"))?
+                {
+                    NbtList::String(c) => c,
+                    _ => return Err(Error::InvalidNbtList("palette")),
+                }
+            };
+            let data = unsafe { (*state_ptr).long_array("data") };
+
+            let data_len = decode_data(&mut old_indexes, get_block_bit_count(palette.len()), data);
+
+            for biome in pending_biomes {
+                let palette_index = match cached_palette_indexes.get(&biome.id) {
+                    Some(idx) => *idx,
+                    None => {
+                        let is_in_palette = palette.iter().any(|b| b == biome.id);
+
+                        if !is_in_palette {
+                            palette.push(biome.id.clone().to_mutf8string());
+                        }
+
+                        let palette_index = palette
+                            .iter()
+                            .position(|b| b == biome.id)
+                            .ok_or(Error::NotInBiomePalette(biome.id.clone()))?
+                            as i64;
+                        cached_palette_indexes.insert(biome.id, palette_index);
+                        palette_index
+                    }
+                };
+
+                let (x, y, z) = (biome.cell.cell.0, biome.cell.cell.1, biome.cell.cell.2);
+                let index = (x
+                    + z * BiomeCell::CELL_SIZE
+                    + y * BiomeCell::CELL_SIZE * BiomeCell::CELL_SIZE)
+                    as usize;
+
+                old_indexes[index] = palette_index;
+            }
+
+            clean_palette(&mut old_indexes, data_len, palette);
+
+            if palette.len() == 1 {
+                // if theres only 1 palette we can remove the data
+                state.remove("data");
+                continue;
+            }
+
+            encode_data(
+                get_biome_bit_count(palette.len()),
+                &old_indexes,
+                data_len,
+                state,
+            );
+        }
+
+        self.seen_biomes.clear();
 
         Ok(())
     }
@@ -357,6 +455,8 @@ impl Region {
 
 #[cfg(test)]
 mod test {
+    use std::time::Instant;
+
     use super::*;
     use crate::Name;
 
@@ -391,7 +491,9 @@ mod test {
             }
         }
 
+        let instant = Instant::now();
         region.set_sections(sections)?;
+        println!("{:?}", instant.elapsed());
 
         let sample = region.get_block(483, 281, 313)?;
         assert_eq!(sample, block);

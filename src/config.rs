@@ -7,7 +7,7 @@ use std::ops::RangeInclusive;
 pub struct Config {
     /// Creates new empty air-filled chunks when chunks are missing.  
     ///
-    /// Look at [`crate::get_empty_chunk`] for the initial data.  
+    /// Look at [`silverfish::get_empty_chunk`](crate::get_empty_chunk) for the initial data.  
     pub create_chunk_if_missing: bool,
     /// If it should flag the chunks for Minecraft to re-calculate lighting when first loaded ingame  
     pub update_lighting: bool,

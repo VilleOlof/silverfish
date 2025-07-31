@@ -11,11 +11,13 @@ license = "MIT"
 repository = "https://github.com/VilleOlof/silverfish"
 
 [dependencies]
-simdnbt = { version = "0.7.1", git = "https://github.com/azalea-rs/simdnbt", rev = "4787a8f5326e7f4a20263873310f0893a59e33ba" }
+simdnbt = "0.7.2"
 mca = "1.1"
 thiserror = "2"
 fixedbitset = "0.5"
 ahash = "0.8"
+dashmap = { version = "6.1.0", features = ["rayon"] }
+rayon = "1.10"
 
 [lib]
 doctest = false
