@@ -37,7 +37,7 @@ pub struct ChunkData {
     /// If this is unmarked, the block write logic will skip this one.  
     pub(crate) dirty_blocks: bool,
     /// If this is unmarked, the biome write logic will skip this one.  
-    pub(crate) dirt_biomes: bool,
+    pub(crate) dirty_biomes: bool,
 }
 
 impl ChunkData {
@@ -105,7 +105,7 @@ impl ChunkData {
                 .entry(cell.section)
                 .or_insert_with(|| Vec::with_capacity((BiomeCell::CELL_SIZE.pow(3)) as usize))
                 .push(BiomeCellWithId { cell, id: biome });
-            self.dirt_biomes = true;
+            self.dirty_biomes = true;
 
             return Ok(Some(()));
         }
@@ -181,7 +181,7 @@ impl ChunkData {
             seen_blocks: ChunkData::block_bitset(world_height_count),
             seen_biomes: ChunkData::biome_bitset(world_height_count),
             dirty_blocks: false,
-            dirt_biomes: false,
+            dirty_biomes: false,
         }
     }
 }

@@ -37,7 +37,7 @@ impl Region {
     pub fn write_biomes(&mut self) -> Result<()> {
         self.chunks
             .par_iter_mut()
-            .filter(|c| c.dirt_biomes)
+            .filter(|c| c.dirty_biomes)
             .try_for_each(|mut ref_mut| {
                 let coords = *ref_mut.key();
                 ref_mut.write_biomes(coords)
@@ -469,7 +469,7 @@ impl ChunkData {
         }
 
         self.seen_biomes.clear();
-        self.dirt_biomes = false;
+        self.dirty_biomes = false;
 
         Ok(())
     }
