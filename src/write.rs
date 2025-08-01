@@ -10,7 +10,6 @@ use crate::{
 use ahash::AHashMap;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use simdnbt::owned::{NbtCompound, NbtList};
-use std::sync::Arc;
 
 impl Region {
     pub(crate) const BLOCK_DATA_LEN: usize = ChunkData::WIDTH.pow(3);
@@ -98,8 +97,7 @@ impl Region {
                 // again, this part is just copied but hard to extrapolate
                 let update_lighting = self.get_config().update_lighting;
                 let mut chunk_data = self.get_chunk_mut(chunk_coords.0, chunk_coords.1)?;
-                let nbt = Arc::get_mut(&mut chunk_data.nbt)
-                    .ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
+                let nbt = &mut chunk_data.nbt;
 
                 is_valid_chunk(&nbt, chunk_coords)?;
 
@@ -211,7 +209,7 @@ impl ChunkData {
         let mut block_entity_cache: AHashMap<(i32, i32, i32), bool> = AHashMap::new();
 
         //  missing chunk etc is set via /set_block since pending is in chunks
-        let nbt = Arc::get_mut(&mut self.nbt).ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
+        let nbt = &mut self.nbt;
         is_valid_chunk(&nbt, chunk_coords)?;
 
         // clear heightmaps if they exist since they can become outdated after this
@@ -385,7 +383,7 @@ impl ChunkData {
         let mut old_indexes: [i64; Region::BIOME_DATA_LEN] = [0; Region::BIOME_DATA_LEN];
         let mut cached_palette_indexes: AHashMap<NbtString, i64> = AHashMap::new();
 
-        let nbt = Arc::get_mut(&mut self.nbt).ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?;
+        let nbt = &mut self.nbt;
         is_valid_chunk(&nbt, chunk_coords)?;
 
         let sections: &mut Vec<NbtCompound> = match nbt

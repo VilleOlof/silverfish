@@ -6,19 +6,15 @@ use crate::{BiomeCell, Block, BlockWithCoordinate, NbtString, Result, biome::Bio
 use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
 use simdnbt::owned::NbtCompound;
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{fmt::Debug, ops::RangeInclusive};
 
 /// A chunk within a region and it's attached data to track pending blocks.  
 ///
 /// Provides some lower level set functions that [`Region`](crate::Region) uses.  
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChunkData {
-    /// The chunks actual NBT data  
-    ///
-    /// This is an [`Arc`] so it can be safetely read in threaded contexts.  
-    /// But when it attempts to take ownership in certain functions it will throw
-    /// an [`TriedToAccessArc`](crate::Error::TriedToAccessArc) error if theres any other strong references.  
-    pub nbt: Arc<NbtCompound>,
+    /// The chunks actual NBT data   
+    pub nbt: NbtCompound,
     /// The world height, we keep a range copy here since we need it
     /// for Bitset and index calculations
     pub(crate) world_height: RangeInclusive<isize>,
@@ -174,7 +170,7 @@ impl ChunkData {
     pub fn new(nbt: NbtCompound, world_height: RangeInclusive<isize>) -> ChunkData {
         let world_height_count = world_height.clone().count();
         ChunkData {
-            nbt: Arc::new(nbt),
+            nbt: nbt,
             world_height: world_height.clone(),
             pending_blocks: AHashMap::new(),
             pending_biomes: AHashMap::new(),

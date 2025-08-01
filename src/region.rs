@@ -10,18 +10,17 @@ use crate::{
     nbt::Block,
 };
 use ahash::AHashMap;
-use dashmap::{DashMap, mapref::one::RefMut};
+use dashmap::{
+    DashMap,
+    mapref::one::{Ref, RefMut},
+};
 use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
     fmt::Debug,
     io::{Cursor, Read, Write},
     ops::{Deref, RangeInclusive},
-    sync::Arc,
 };
-
-#[cfg(test)]
-use dashmap::mapref::one::Ref;
 
 /// An in-memory region to read and write blocks to the chunks within.  
 #[derive(Clone)]
@@ -205,10 +204,7 @@ impl Region {
 
         for ((x, z), chunk_data) in self.chunks {
             let mut raw_nbt = vec![];
-            let wrapped = Nbt::Some(BaseNbt::new(
-                "",
-                Arc::into_inner(chunk_data.nbt).ok_or(Error::TriedToAccessArc("chunk_data.nbt"))?,
-            ));
+            let wrapped = Nbt::Some(BaseNbt::new("", chunk_data.nbt));
             wrapped.write(&mut raw_nbt);
             region_writer.push_chunk_with_compression(&raw_nbt, (x, z), CompressionType::Zlib)?;
         }
@@ -228,12 +224,12 @@ impl Region {
     /// let chunk = region.get_chunk(5, 17)?;
     /// # Ok::<(), silverfish::Error>(())
     /// ```
-    pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<Arc<NbtCompound>>> {
+    pub fn get_chunk(&self, x: u8, z: u8) -> Result<Option<Ref<'_, (u8, u8), ChunkData>>> {
         if x >= mca::REGION_SIZE as u8 || z >= mca::REGION_SIZE as u8 {
             return Err(Error::ChunkOutOfRegionBounds(x, z));
         }
 
-        Ok(self.chunks.get(&(x, z)).map(|c| Arc::clone(&c.nbt)))
+        Ok(self.chunks.get(&(x, z)))
     }
 
     /// Returns the raw [`ChunkData`].  
@@ -280,6 +276,28 @@ impl Region {
             }
             None => return Err(Error::TriedToModifyMissingChunk(x, z)),
         };
+    }
+
+    /// Returns if all chunks inside the region has been generated and is [`Region::REQUIRED_STATUS`]
+    pub fn is_region_generated(&self) -> Result<bool> {
+        for x in 0..mca::REGION_SIZE as u8 {
+            for z in 0..mca::REGION_SIZE as u8 {
+                let chunk = self.get_chunk(x, z)?;
+                match chunk {
+                    Some(ch) => match ch.nbt.string("Status") {
+                        Some(status) => {
+                            if status.to_str() != Region::REQUIRED_STATUS {
+                                return Ok(false);
+                            }
+                        }
+                        None => return Ok(false),
+                    },
+                    None => return Ok(false),
+                };
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -524,7 +542,7 @@ mod test {
     fn empty_region() -> Result<()> {
         let region = Region::empty((0, 0));
         assert_eq!(region.chunks.len(), 0);
-        assert_eq!(region.get_chunk(0, 0)?, None);
+        assert!(region.get_chunk(0, 0)?.is_none());
         assert_eq!(region.region_coords, (0, 0));
         Ok(())
     }
@@ -603,6 +621,13 @@ mod test {
         assert!(region.get_chunk(9, 1)?.is_some());
         assert!(region.get_chunk(1, 9)?.is_none());
 
+        Ok(())
+    }
+
+    #[test]
+    fn fully_generated() -> Result<()> {
+        let region = Region::default();
+        assert!(region.is_region_generated()?);
         Ok(())
     }
 }
