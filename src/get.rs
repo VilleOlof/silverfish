@@ -39,6 +39,16 @@ impl Region {
             })
     }
 
+    // you could make get_blocks even more generic and maybe faster for the user.
+    // the slowest part is the grouping, so we "could" leave that up to the user if they wanted
+    // or we group it if not, by having an enum that is either "Ungrouped(&[C])" or "Grouped(Vec<GetChunkGroup>)"
+    // and then the main "blocks" arg becomes "C: Into<MaybeGrouped>" and if its not grouped in that enum
+    // we can just do it automatically. the thing is that "Vec<GetChunkGroup>" is REALLY awkward to group yourself
+    // and if tested just using a hashmap of "AHashMap<(u8, u8>, AHashMap<i8, Vec<Coords>>>" and just iterating
+    // over it raw isntead of the vec thing, but its always slower than grouping and then iterating over that vec.
+    // so im leaving this comment here to mention this design choice and that we could do it or something similar.
+    // - ville (2025-08-03, 23:30)
+
     /// Returns the blocks at the specified coordinates *(local to within the region)*.  
     ///
     /// Global coordinates can be converted to region local via [`silverfish::to_region_local`](crate::to_region_local).  
