@@ -1,6 +1,6 @@
 //! `set` handles all functions related to pushing blocks to the [`Region`]'s internal block buffer.  
 
-use crate::{BiomeCell, Block, CHUNK_OP, ChunkData, NbtString, Region, Result};
+use crate::{BiomeCell, Block, CHUNK_OP, ChunkData, Coords, NbtString, Region, Result};
 use ahash::AHashMap;
 use std::ops::Range;
 
@@ -21,28 +21,29 @@ impl Region {
     /// ```
     /// # use silverfish::{Region, Block};
     /// # let mut region = Region::default();
-    /// let _ = region.set_block(5, 97, 385, Block::new("dirt"))?;
+    /// let _ = region.set_block((5, 97, 385), Block::new("dirt"))?;
     /// // and to actually write the changes to the NBT
     /// region.write_blocks()?;
     /// # Ok::<(), silverfish::Error>(())
     /// ```
-    pub fn set_block<B: Into<Block>>(
-        &mut self,
-        x: u32,
-        y: i32,
-        z: u32,
-        block: B,
-    ) -> Result<Option<()>> {
+    pub fn set_block<C, B: Into<Block>>(&mut self, coords: C, block: B) -> Result<Option<()>>
+    where
+        C: Into<Coords>,
+    {
+        let coords: Coords = coords.into();
         let (chunk_x, chunk_z) = (
-            (x / ChunkData::WIDTH as u32) as u8,
-            (z / ChunkData::WIDTH as u32) as u8,
+            (coords.x / ChunkData::WIDTH as u32) as u8,
+            (coords.z / ChunkData::WIDTH as u32) as u8,
         );
         let mut chunk_data = self.get_chunk_mut(chunk_x, chunk_z)?;
         // convert the coordinates into chunk local
+        // we skip Y until writing since it gets only divided into sections then
         chunk_data.set_block(
-            x & CHUNK_OP as u32,
-            y, // we skip Y until writing since it gets only divided into sections then
-            z & CHUNK_OP as u32,
+            Coords::new(
+                coords.x & CHUNK_OP as u32,
+                coords.y,
+                coords.z & CHUNK_OP as u32,
+            ),
             block,
         )
     }
@@ -55,9 +56,9 @@ impl Region {
     /// - The section Y index *(-4..=19)*
     /// - The cell coordinates within the section *(0..=3)*
     ///
-    /// You can use [`coordinates_to_cell`] to convert region local coordinates to the needed data.  
+    /// You can use [`coordinates_to_biome_cell`](crate::biome::coordinates_to_biome_cell) to convert region local coordinates to the needed data.  
     ///
-    /// Alternatively, you can just give it the coordinates directly since `(u32, i32, u32)` implements `Into<BiomeCell>`
+    /// Alternatively, you can just give it the coordinates directly since [`Coords`] implements `Into<BiomeCell>`
     ///
     /// ## Example
     /// ```
@@ -163,7 +164,7 @@ mod test {
     fn pre_set_block() -> Result<()> {
         let mut region = Region::default();
         region
-            .set_block(1, 2, 3, Block::try_new("minecraft:red_stained_glass")?)?
+            .set_block((1, 2, 3), Block::try_new("minecraft:red_stained_glass")?)?
             .unwrap();
 
         assert_eq!(region.get_raw_chunk(0, 0)?.unwrap().pending_blocks.len(), 1);
@@ -183,10 +184,15 @@ mod test {
     fn set_duplicate_block() -> Result<()> {
         let mut region = Region::default();
         region
-            .set_block(52, -5, 395, Block::try_new("minecraft:red_stained_glass")?)?
+            .set_block(
+                (52, -5, 395),
+                Block::try_new("minecraft:red_stained_glass")?,
+            )?
             .unwrap();
-        let success =
-            region.set_block(52, -5, 395, Block::try_new("minecraft:lime_stained_glass")?)?;
+        let success = region.set_block(
+            (52, -5, 395),
+            Block::try_new("minecraft:lime_stained_glass")?,
+        )?;
 
         assert_eq!(success, None);
         assert_eq!(
@@ -209,7 +215,7 @@ mod test {
     fn set_block() -> Result<()> {
         let mut region = Region::default();
         region
-            .set_block(6, 52, 95, Block::try_new("minecraft:oak_planks")?)?
+            .set_block((6, 52, 95), Block::try_new("minecraft:oak_planks")?)?
             .unwrap();
 
         assert_eq!(region.get_raw_chunk(0, 5)?.unwrap().pending_blocks.len(), 1);
@@ -225,11 +231,11 @@ mod test {
         region.write_blocks()?;
 
         assert_eq!(
-            region.get_block(6, 52, 95)?,
+            region.get_block((6, 52, 95))?,
             Block::try_new("minecraft:oak_planks")?
         );
         assert_eq!(
-            region.get_block(52, 1, 5)?,
+            region.get_block((52, 1, 5))?,
             Block::try_new("minecraft:air")?
         );
 

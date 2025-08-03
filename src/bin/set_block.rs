@@ -10,7 +10,7 @@ fn main() -> Result<()> {
     println!("Took {:?} to create empty region", main_instant.elapsed());
 
     let set_instant = Instant::now();
-    region.set_block(2, 80, 2, Block::new("beacon")).unwrap();
+    region.set_block((2, 80, 2), Block::new("beacon")).unwrap();
     println!("Took {:?} to set_block", set_instant.elapsed());
 
     let write_instant = Instant::now();
@@ -19,7 +19,7 @@ fn main() -> Result<()> {
 
     let get_instant = Instant::now();
     region
-        .get_block(2, 80, 2)
+        .get_block((2, 80, 2))
         .inspect_err(|e| println!("{e}"))?;
     println!("Took {:?} to get_block", get_instant.elapsed());
 

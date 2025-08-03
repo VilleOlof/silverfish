@@ -320,9 +320,9 @@ impl ChunkData {
                 };
 
                 let (x, y, z) = (
-                    block.coordinates.0,
-                    block.coordinates.1 & CHUNK_OP, // divide Y into section here
-                    block.coordinates.2,
+                    block.coordinates.x,
+                    block.coordinates.y & CHUNK_OP, // divide Y into section here
+                    block.coordinates.z,
                 );
                 let index = (x
                     + z * ChunkData::WIDTH as u32
@@ -475,8 +475,6 @@ impl ChunkData {
 
 #[cfg(test)]
 mod test {
-    use std::time::Instant;
-
     use super::*;
     use crate::Name;
 
@@ -488,7 +486,7 @@ mod test {
             2,
             Block::try_new(Name::new_namespace("minecraft:beacon"))?,
         )?;
-        let beacon = region.get_block(5, 35, 11)?;
+        let beacon = region.get_block((5, 35, 11))?;
         assert_eq!(
             beacon,
             Block::try_new(Name::new_namespace("minecraft:beacon"))?
@@ -511,11 +509,9 @@ mod test {
             }
         }
 
-        let instant = Instant::now();
         region.set_sections(sections)?;
-        println!("{:?}", instant.elapsed());
 
-        let sample = region.get_block(483, 281, 313)?;
+        let sample = region.get_block((483, 281, 313))?;
         assert_eq!(sample, block);
 
         Ok(())

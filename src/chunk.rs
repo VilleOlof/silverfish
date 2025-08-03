@@ -2,11 +2,13 @@
 //! [`ChunkData`] is a wrapper for the actual chunk nbt and some attached data
 //! to keep track of pending blocks and biomes and what blocks/biomes we've seen before.  
 
-use crate::{BiomeCell, Block, BlockWithCoordinate, NbtString, Result, biome::BiomeCellWithId};
+use crate::{
+    BiomeCell, Block, BlockWithCoordinate, Coords, NbtString, Result, biome::BiomeCellWithId,
+};
 use ahash::AHashMap;
 use fixedbitset::FixedBitSet;
 use simdnbt::owned::NbtCompound;
-use std::{fmt::Debug, ops::RangeInclusive};
+use std::{fmt::Debug, ops::Range};
 
 /// A chunk within a region and it's attached data to track pending blocks.  
 ///
@@ -17,8 +19,14 @@ pub struct ChunkData {
     pub nbt: NbtCompound,
     /// The world height, we keep a range copy here since we need it
     /// for Bitset and index calculations
-    pub(crate) world_height: RangeInclusive<isize>,
+    pub(crate) world_height: Range<isize>,
 
+    // note: we changed pending blocks to use a palette system, similar to Minecraft
+    // to use less memory and using references and lazily converting nbt > rust data
+    // we could do something similar to this but i have no clue if its worth the rewrite
+    // here do we store each block and its coordinate, soo putting in like a whole region is slow.
+    // but on the other side, the user can just fix that themself by set_block'ing per chunk
+    // and or flushing the blocks faster, which isnt possible with get_blocks and how that works.
     /// The blocks that have been written but not pushed to the NBT
     pub(crate) pending_blocks: AHashMap<i8, Vec<BlockWithCoordinate>>,
     /// A check of what blocks has been seen before in `pending_blocks`
@@ -46,26 +54,24 @@ impl ChunkData {
     ///
     /// In most cases you'd want to use [`Region::set_block`](crate::Region::set_block) instead since that picks  
     /// the right chunk and handles it for you.  
-    pub fn set_block<B: Into<Block>>(
-        &mut self,
-        x: u32,
-        y: i32,
-        z: u32,
-        block: B,
-    ) -> Result<Option<()>> {
-        assert!(x < ChunkData::WIDTH as u32 && z < ChunkData::WIDTH as u32);
+    pub fn set_block<C, B: Into<Block>>(&mut self, coords: C, block: B) -> Result<Option<()>>
+    where
+        C: Into<Coords>,
+    {
+        let coords: Coords = coords.into();
+        assert!(coords.x < ChunkData::WIDTH as u32 && coords.z < ChunkData::WIDTH as u32);
 
-        let index = self.get_block_index(x, y, z);
+        let index = self.get_block_index(&coords);
         if !self.seen_blocks.contains(index) {
             self.seen_blocks.insert(index);
 
-            let section_y = (y as f64 / ChunkData::WIDTH as f64).floor() as i8;
+            let section_y = (coords.y as f64 / ChunkData::WIDTH as f64).floor() as i8;
 
             self.pending_blocks
                 .entry(section_y)
                 .or_insert_with(|| Vec::with_capacity(ChunkData::WIDTH.pow(3)))
                 .push(BlockWithCoordinate {
-                    coordinates: (x, y, z),
+                    coordinates: coords,
                     block: block.into(),
                 });
             self.dirty_blocks = true;
@@ -110,13 +116,13 @@ impl ChunkData {
     }
 
     /// Returns the [`FixedBitSet`] index for these coordinates.  
-    pub(crate) fn get_block_index(&self, x: u32, y: i32, z: u32) -> usize {
-        let y_offset = (y as isize - self.world_height.start()) as usize;
-        x as usize
+    pub(crate) fn get_block_index(&self, coords: &Coords) -> usize {
+        let y_offset = (coords.y as isize - self.world_height.start) as usize;
+        coords.x as usize
             + y_offset * ChunkData::WIDTH
-            + z as usize
+            + coords.z as usize
                 * ChunkData::WIDTH
-                * (self.world_height.end() - -self.world_height.start()) as usize
+                * (self.world_height.end - -self.world_height.start) as usize
     }
 
     /// Returns the index for a biome in the [`Self::seen_biomes`] bitset based of it's cell coordinates  
@@ -128,7 +134,7 @@ impl ChunkData {
             cell.cell.2 as usize,
         );
 
-        (cell.section - (*self.world_height.start() / ChunkData::WIDTH as isize) as i8) as usize
+        (cell.section - (self.world_height.start / ChunkData::WIDTH as isize) as i8) as usize
             * cell_size
             * cell_size
             * cell_size
@@ -167,7 +173,7 @@ impl ChunkData {
     }
 
     /// Creates a new [`ChunkData`] with empty and cleared buffers.  
-    pub fn new(nbt: NbtCompound, world_height: RangeInclusive<isize>) -> ChunkData {
+    pub fn new(nbt: NbtCompound, world_height: Range<isize>) -> ChunkData {
         let world_height_count = world_height.clone().count();
         ChunkData {
             nbt: nbt,

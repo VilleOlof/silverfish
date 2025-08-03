@@ -19,7 +19,7 @@ fn main() -> Result<()> {
         "[{:?}] {} / {}",
         instant.elapsed(),
         blocks.len(),
-        512 * 384 * 512
+        512 * 384 * 512,
     );
 
     Ok(())

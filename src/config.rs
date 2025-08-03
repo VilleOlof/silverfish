@@ -1,6 +1,6 @@
 //! `config` contains the [`Config`] used in [`crate::Region`].  
 
-use std::ops::RangeInclusive;
+use std::ops::Range;
 
 /// A config used for dictating how [`crate::Region`] should write blocks.  
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub struct Config {
     /// How tall/deep the world is, defaults to `-64..=320`
     ///
     /// Used for properly setting internal buffers.  
-    pub(crate) world_height: RangeInclusive<isize>,
+    pub(crate) world_height: Range<isize>,
 }
 
 impl Default for Config {
@@ -30,12 +30,12 @@ impl Default for Config {
 
 impl Config {
     /// The default world height in Minecraft (as of `1.17+ (21w06a)`)
-    pub const DEFAULT_WORLD_HEIGHT: RangeInclusive<isize> = -64..=320;
+    pub const DEFAULT_WORLD_HEIGHT: Range<isize> = -64..320;
 
     /// Returns the world_height.  
     ///
     /// **Note:** to mutate world_height you either need to pass it a region first or use [`Config::new`].
-    pub fn get_world_height(&self) -> &RangeInclusive<isize> {
+    pub fn get_world_height(&self) -> &Range<isize> {
         &self.world_height
     }
 
@@ -43,7 +43,7 @@ impl Config {
     pub fn new(
         create_chunk_if_missing: bool,
         update_lighting: bool,
-        world_height: RangeInclusive<isize>,
+        world_height: Range<isize>,
     ) -> Self {
         Self {
             create_chunk_if_missing,

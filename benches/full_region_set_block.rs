@@ -32,9 +32,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
                 chunk
                     .set_block(
-                        black_box(x as u32),
-                        black_box(y),
-                        black_box(z as u32),
+                        (black_box(x as u32), black_box(y), black_box(z as u32)),
                         black_box(block.clone()),
                     )
                     .unwrap();

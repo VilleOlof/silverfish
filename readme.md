@@ -29,8 +29,9 @@ To actually flush the block changes to the chunks, call `Region::write_blocks`
 use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
-// look at `silverfish::Block` for info on blocks
-region.set_block(42, 65, 84, "stone")?;
+// look at `silverfish::Block` for info on blocks  
+// and at `silverfish::Coords` for all coordinate arguments.  
+region.set_block((42, 65, 84), "stone")?;
 region.write_blocks()?;
 let mut buf = vec![];
 region.write(&mut buf)?;
@@ -49,7 +50,7 @@ use silverfish::Region;
 
 let mut region_buf = std::io::Cursor::new(vec![]);
 let region = Region::from_region(&mut region_buf, (0, 0))?;
-let block = region.get_block(42, 65, 84)?;
+let block = region.get_block((42, 65, 84))?;
 
 Ok::<(), silverfish::Error>(())
 ```
@@ -194,7 +195,7 @@ use silverfish::Region;
 let mut region = Region::full_empty((0, 0));
 // preallocates the first 16 chunks within the region
 region.allocate_block_buffer(0..4, 0..4, -4..20, 4096);
-region.set_block(6, 1, 7, "birch_planks");
+region.set_block((6, 1, 7), "birch_planks");
 // ...
 ```
 
@@ -216,11 +217,11 @@ Let's say you're writing a ton of blocks.
 use silverfish::{Region, Error};
 
 let mut region = Region::full_empty((0, 0));
-region.set_block(5, 1, 28, "air");
+region.set_block((5, 1, 28), "air");
 region.write_blocks()?;
-region.set_block(71, -5, 14, "air");
+region.set_block((71, -5, 14), "air");
 region.write_blocks()?;
-region.set_block(451, 51, 162, "air");
+region.set_block((451, 51, 162), "air");
 region.write_blocks()?;
 
 Ok::<(), silverfish::Error>(())
@@ -230,9 +231,9 @@ Ok::<(), silverfish::Error>(())
 use silverfish::Region;
 
 let mut region = Region::full_empty((0, 0));
-region.set_block(5, 1, 28, "air");
-region.set_block(71, -5, 14, "air");
-region.set_block(451, 51, 162, "air");
+region.set_block((5, 1, 28), "air");
+region.set_block((71, -5, 14), "air");
+region.set_block((451, 51, 162), "air");
 region.write_blocks()?;
 
 Ok::<(), silverfish::Error>(())
@@ -245,10 +246,10 @@ This can also be applied to getting a ton of blocks at the same time.
 use silverfish::Region;
 
 let region = Region::full_empty((0, 0));
-let block_1 = region.get_block(6, 1, 4)?;
-let block_2 = region.get_block(1, -61, 52)?;
-let block_3 = region.get_block(78, 13, 152)?;
-let block_4 = region.get_block(4, 62, 84)?;
+let block_1 = region.get_block((6, 1, 4))?;
+let block_2 = region.get_block((1, -61, 52))?;
+let block_3 = region.get_block((78, 13, 152))?;
+let block_4 = region.get_block((4, 62, 84))?;
 
 Ok::<(), silverfish::Error>(())
 ```
@@ -276,6 +277,8 @@ and placing a furnace at `0, 0, 0` in each chunk.
 
 `region.write_blocks()?` is already parallel internally,  
 So no need to try and call it within the `par_iter`.  
+If wish to skip the internal parallel of `region.write_blocks()?`:  
+You can call `write_blocks(...)?` on each chunk and manage it yourself.  
 
 ```rust
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -285,7 +288,7 @@ let mut region = Region::full_empty((0, 0));
 
 (0..32).collect::<Vec<u8>>().par_iter().try_for_each(|z| {
     let mut chunk = region.get_chunk_mut(0, *z)?;
-    chunk.set_block(0, 0, 0, "furnace").unwrap();
+    chunk.set_block((0, 0, 0), "furnace").unwrap();
 
     Ok::<(), silverfish::Error>(())
 })?;

@@ -26,7 +26,7 @@ fn main() -> Result<()> {
             let chunk_z = z as u8 / 16;
 
             let mut chunk = region.get_chunk_mut(chunk_x, chunk_z)?;
-            chunk.set_block(x & 15, y, z & 15, block.clone())?;
+            chunk.set_block((x & 15, y, z & 15), block.clone())?;
 
             Ok::<(), Error>(())
         })?;

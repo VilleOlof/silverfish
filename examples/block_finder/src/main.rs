@@ -1,5 +1,5 @@
 use silverfish::{Name, Region, Result};
-use std::{env::args, fs::File};
+use std::{env::args, fs::File, path::PathBuf};
 
 // block_finder <region_file> <block_id>
 fn main() -> Result<()> {
@@ -9,7 +9,12 @@ fn main() -> Result<()> {
     let block_name = Name::new_id(block_id.as_str()).into_namespaced();
 
     // we expect the region file to follow this format "r.x.x.mca"
-    let region_coordinates = region.split('.').collect::<Vec<&str>>();
+    let name = PathBuf::from(region)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let region_coordinates = name.split('.').collect::<Vec<&str>>();
     let region_x = region_coordinates.get(1).unwrap().parse::<i32>().unwrap();
     let region_z = region_coordinates.get(2).unwrap().parse::<i32>().unwrap();
 
@@ -31,8 +36,8 @@ fn main() -> Result<()> {
 
             let blocks = region.get_blocks(&blocks_to_search)?;
 
-            for block in blocks {
-                if block.block.name == block_name {
+            for block in &blocks {
+                if block.1.name == block_name {
                     found = Some(block);
                     break 'outer;
                 }
@@ -44,10 +49,7 @@ fn main() -> Result<()> {
 
     match found {
         Some(block) => {
-            println!(
-                "Found block matching {:?} at {:?}",
-                block.block, block.coordinates
-            );
+            println!("Found block matching {:?} at {:?}", block.1, block.0);
         }
         None => println!("Found no block matching {block_name:?}"),
     }

@@ -50,4 +50,6 @@ pub enum Error {
     NotInBiomePalette(NbtString),
     #[error("Tried to take ownership of an Arc that has multiple strong references: {0}")]
     TriedToAccessArc(&'static str),
+    #[error("The PalettedBlock > blocks index is unset (u32::MAX)")]
+    UnsetPaletteBlock(u32),
 }

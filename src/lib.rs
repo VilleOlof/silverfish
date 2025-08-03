@@ -6,11 +6,13 @@
 mod biome;
 mod chunk;
 mod config;
+mod coords;
 mod data;
 mod error;
 mod get;
 mod nbt;
 mod nbt_impls;
+mod paletted_blocks;
 mod region;
 mod set;
 mod write;
@@ -18,8 +20,10 @@ mod write;
 pub use biome::{BiomeCell, BiomeCellWithId, coordinates_to_biome_cell};
 pub use chunk::ChunkData;
 pub use config::Config;
+pub use coords::Coords;
 pub use error::{Error, Result};
 pub use nbt::{Block, Name, NbtString};
+pub use paletted_blocks::{PalettedBlocks, PalettedBlocksIntoIter};
 pub use region::{BlockWithCoordinate, Region, get_empty_chunk, to_region_local};
 
 /// How many blocks wide a region is.  

@@ -3,7 +3,7 @@
 //! Contains functions for constructing a [`Region`] and writing itself to a specified buffer.  
 
 use crate::{
-    BLOCKS_PER_REGION,
+    BLOCKS_PER_REGION, Coords,
     chunk::ChunkData,
     config::Config,
     error::{Error, Result},
@@ -19,7 +19,7 @@ use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
     fmt::Debug,
     io::{Cursor, Read, Write},
-    ops::{Deref, RangeInclusive},
+    ops::{Deref, Range},
 };
 
 /// An in-memory region to read and write blocks to the chunks within.  
@@ -28,7 +28,7 @@ pub struct Region {
     /// The chunks within the Region, mapped to their coordinates
     pub chunks: DashMap<(u8, u8), ChunkData>,
     /// Config on how it should handle certain scenarios
-    config: Config,
+    pub(crate) config: Config,
     /// Coordinates for this specific region
     pub region_coords: (i32, i32),
 }
@@ -37,7 +37,7 @@ pub struct Region {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockWithCoordinate {
     /// The attached coordinates related to the block.  
-    pub coordinates: (u32, i32, u32),
+    pub coordinates: Coords,
     /// The block itself.  
     pub block: Block,
 }
@@ -84,10 +84,10 @@ impl Region {
     /// ```
     /// # use silverfish::Region;
     /// # let mut region = Region::default();
-    /// region.set_world_height(128..=320);
+    /// region.set_world_height(128..320);
     /// # Ok::<(), silverfish::Error>(())
     /// ```
-    pub fn set_world_height(&mut self, range: RangeInclusive<isize>) -> Result<()> {
+    pub fn set_world_height(&mut self, range: Range<isize>) -> Result<()> {
         // clear all the chunks buffers
         let world_height_count = range.clone().count();
         for x in 0..32 {
@@ -250,7 +250,7 @@ impl Region {
     /// ```
     /// # let mut region = silverfish::Region::default();
     /// let mut chunk = region.get_chunk_mut(1, 13)?;
-    /// let _ = chunk.set_block(6, 124, 14, "anvil")?;
+    /// let _ = chunk.set_block((6, 124, 14), "anvil")?;
     /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn get_chunk_mut<'a>(&'a self, x: u8, z: u8) -> Result<RefMut<'a, (u8, u8), ChunkData>> {
@@ -350,13 +350,13 @@ pub(crate) fn get_biome_bit_count(len: usize) -> u32 {
 pub fn get_empty_chunk(
     coords: (u8, u8),
     region_coords: (i32, i32),
-    world_height: RangeInclusive<isize>,
+    world_height: Range<isize>,
 ) -> NbtCompound {
     let mut sections: Vec<NbtCompound> =
         Vec::with_capacity(Config::DEFAULT_WORLD_HEIGHT.clone().count() / ChunkData::WIDTH);
     let (section_start, section_end) = (
-        (world_height.start() / ChunkData::WIDTH as isize) as i8,
-        (world_height.end() / ChunkData::WIDTH as isize) as i8,
+        (world_height.start / ChunkData::WIDTH as isize) as i8,
+        (world_height.end / ChunkData::WIDTH as isize) as i8,
     );
 
     // one thing would be to move these to world_height.start / 16 and world_height.end / 16
@@ -412,12 +412,13 @@ pub fn get_empty_chunk(
 /// let local_coords = to_region_local(coords);
 /// assert_eq!(local_coords, (183, -17, 213))
 /// ```
-pub fn to_region_local(coords: (i32, i32, i32)) -> (u32, i32, u32) {
+pub fn to_region_local(coords: (i32, i32, i32)) -> Coords {
     (
-        (coords.0 & (BLOCKS_PER_REGION - 1) as i32) as u32,
+        (coords.0 as i32 & (BLOCKS_PER_REGION - 1) as i32) as u32,
         coords.1,
-        (coords.2 & (BLOCKS_PER_REGION - 1) as i32) as u32,
+        (coords.2 as i32 & (BLOCKS_PER_REGION - 1) as i32) as u32,
     )
+        .into()
 }
 
 /// Checks the data_version and status of the chunk if it's valid to operate on

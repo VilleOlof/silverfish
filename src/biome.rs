@@ -1,7 +1,7 @@
 //! `biome` contains small random functions related to biomes.  
 //! As well as the biome's related structures.  
 
-use crate::{BLOCKS_PER_REGION, BlockWithCoordinate, CHUNK_OP, ChunkData, NbtString};
+use crate::{BLOCKS_PER_REGION, BlockWithCoordinate, CHUNK_OP, ChunkData, Coords, NbtString};
 use ahash::AHashMap;
 
 #[cfg(test)]
@@ -60,14 +60,17 @@ impl BiomeCell {
     }
 
     /// Creates a new [`BiomeCell`] based off **region** local coordinates.  
-    pub fn from_coordinates(x: u32, y: i32, z: u32) -> Self {
-        coordinates_to_biome_cell(x, y, z)
+    pub fn from_coordinates<C>(coords: C) -> Self
+    where
+        C: Into<Coords>,
+    {
+        coordinates_to_biome_cell(coords)
     }
 
     /// Converts a [`BiomeCell`] back into it's region local coordinates.  
     ///
     /// *Hooks on the cells smallest corner*  
-    pub fn to_coordinates(&self) -> (u32, i32, u32) {
+    pub fn to_coordinates(&self) -> Coords {
         let mut x = self.chunk.0 as usize * ChunkData::WIDTH;
         let mut y = self.section as isize * ChunkData::WIDTH as isize;
         let mut z = self.chunk.1 as usize * ChunkData::WIDTH;
@@ -76,7 +79,7 @@ impl BiomeCell {
         y += self.cell.1 as isize * BiomeCell::CELL_SIZE as isize;
         z += self.cell.2 as usize * BiomeCell::CELL_SIZE as usize;
 
-        (x as u32, y as i32, z as u32)
+        (x as u32, y as i32, z as u32).into()
     }
 }
 
@@ -88,29 +91,39 @@ impl Into<BiomeCell> for ((u8, u8), i8, (u8, u8, u8)) {
 
 impl Into<BiomeCell> for (u32, i32, u32) {
     fn into(self) -> BiomeCell {
-        BiomeCell::from_coordinates(self.0, self.1, self.2)
+        BiomeCell::from_coordinates(self)
+    }
+}
+
+impl Into<BiomeCell> for Coords {
+    fn into(self) -> BiomeCell {
+        BiomeCell::from_coordinates(self)
     }
 }
 
 impl Into<BiomeCell> for BlockWithCoordinate {
     fn into(self) -> BiomeCell {
-        BiomeCell::from_coordinates(self.coordinates.0, self.coordinates.1, self.coordinates.2)
+        BiomeCell::from_coordinates(self.coordinates)
     }
 }
 
 /// Converts a set of region local coordinates to it's appropriate biome cell.  
-pub fn coordinates_to_biome_cell(x: u32, y: i32, z: u32) -> BiomeCell {
-    assert!(x < BLOCKS_PER_REGION && z < BLOCKS_PER_REGION);
+pub fn coordinates_to_biome_cell<C>(coords: C) -> BiomeCell
+where
+    C: Into<Coords>,
+{
+    let coords: Coords = coords.into();
+    assert!(coords.x < BLOCKS_PER_REGION && coords.z < BLOCKS_PER_REGION);
 
     let chunk_coords = (
-        (x as f64 / ChunkData::WIDTH as f64).floor() as u8,
-        (z as f64 / ChunkData::WIDTH as f64).floor() as u8,
+        (coords.x as f64 / ChunkData::WIDTH as f64).floor() as u8,
+        (coords.z as f64 / ChunkData::WIDTH as f64).floor() as u8,
     );
-    let section = (y as f64 / ChunkData::WIDTH as f64).floor() as i8;
+    let section = (coords.y as f64 / ChunkData::WIDTH as f64).floor() as i8;
     let cell_coords = (
-        ((x & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
-        ((y & CHUNK_OP as i32) / BiomeCell::CELL_SIZE as i32) as u8,
-        ((z & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
+        ((coords.x & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
+        ((coords.y & CHUNK_OP as i32) / BiomeCell::CELL_SIZE as i32) as u8,
+        ((coords.z & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
     );
 
     BiomeCell::new(chunk_coords, section, cell_coords)
@@ -274,7 +287,7 @@ mod test {
 
     #[test]
     fn biome_cell_coordinate_from_coordinate() {
-        let cell = BiomeCell::from_coordinates(26, 61, 163);
+        let cell = BiomeCell::from_coordinates((26, 61, 163));
         let coordinates = cell.to_coordinates();
         assert_eq!(coordinates, (24, 60, 160));
     }
@@ -290,7 +303,7 @@ mod test {
     fn biome_cell_coordinate_roundtrip() {
         let cell = BiomeCell::new((7, 1), 4, (2, 3, 1));
         let coords = cell.to_coordinates();
-        let new_cell = BiomeCell::from_coordinates(coords.0, coords.1, coords.2);
+        let new_cell = BiomeCell::from_coordinates(coords);
         assert_eq!(cell, new_cell);
     }
 }
