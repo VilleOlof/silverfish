@@ -159,7 +159,7 @@ impl Region {
     /// ```
     /// # use silverfish::Region;
     /// # use std::fs::File;
-    /// let mut region = Region::from_region(&mut File::open("r.0.0.mca")?, (0, 0))?;
+    /// let mut region = Region::from_region(&mut File::open("tests/full_region.mca")?, (0, 0))?;
     /// # Ok::<(), silverfish::Error>(())
     /// ```
     pub fn from_region<R: Read>(reader: &mut R, region_coords: (i32, i32)) -> Result<Self> {
