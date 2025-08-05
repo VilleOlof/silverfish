@@ -191,7 +191,7 @@ impl<'a> PalettedBlocks<'a> {
     /// ```
     /// # use silverfish::PalettedBlocks;
     /// let mut blocks = PalettedBlocks::new(-64..320, 16);
-    /// let palette = PalettedBlocks::generate_palette(vec!["stone".into()])?;
+    /// let palette = PalettedBlocks::generate_palette(vec!["stone"])?;
     ///
     /// let _ = blocks.insert((8, -38, 13), &palette.as_slice(), 0);
     /// # Ok::<(), silverfish::Error>(())
@@ -260,7 +260,7 @@ impl<'a> PalettedBlocks<'a> {
     /// # use silverfish::PalettedBlocks;
     /// let mut blocks = PalettedBlocks::new(-64..320, 16);
     /// // inserting..
-    /// # let palette = PalettedBlocks::generate_palette(vec!["stone".into()])?;
+    /// # let palette = PalettedBlocks::generate_palette(vec!["stone"])?;
     /// # let palette = palette.as_slice();
     /// # blocks.insert((8, 183, 1), &palette, 0);
     /// let block = blocks.get((8, 183, 1))?;
@@ -301,7 +301,7 @@ impl<'a> PalettedBlocks<'a> {
     /// # use silverfish::PalettedBlocks;
     /// let mut blocks = PalettedBlocks::new(-64..320, 16);
     /// // insert blocks..
-    /// # let palette = PalettedBlocks::generate_palette(vec!["stone".into()])?;
+    /// # let palette = PalettedBlocks::generate_palette(vec!["stone"])?;
     /// # let palette = palette.as_slice();
     /// # blocks.insert((14, 62, 2), &palette, 0);
     /// let block = blocks.remove((14, 62, 2))?;
@@ -388,20 +388,24 @@ impl<'a> PalettedBlocks<'a> {
     /// ## Example
     /// ```
     /// # use silverfish::{PalettedBlocks};
-    /// let palette = PalettedBlocks::generate_palette(vec!["stone".into(), "dirt".into()])?;
+    /// let palette = PalettedBlocks::generate_palette(vec!["stone", "dirt"])?;
     /// let palette = palette.as_slice();
     ///
     /// let mut blocks = PalettedBlocks::new(-64..320, 16);
     /// blocks.insert((14, 65, 6), &palette, 1); // inserts a dirt block at 14, 65, 6
     /// # Ok::<(), silverfish::Error>(())
     /// ```
-    pub fn generate_palette(blocks: Vec<Block>) -> Result<Vec<NbtCompound>> {
-        let mut nbt_blocks: Vec<NbtCompound> = vec![];
-        for block in blocks {
-            nbt_blocks.push(block.to_compound()?);
-        }
-
-        Ok(nbt_blocks)
+    pub fn generate_palette<B>(blocks: Vec<B>) -> Result<Vec<NbtCompound>>
+    where
+        B: Into<Block>,
+    {
+        Ok(blocks
+            .into_iter()
+            .map(|b| {
+                let block: Block = b.into();
+                block.to_compound()
+            })
+            .collect::<Result<Vec<NbtCompound>>>()?)
     }
 }
 
@@ -479,7 +483,7 @@ mod test {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
         assert_eq!(blocks.len(), 0);
 
-        let palette = PalettedBlocks::generate_palette(vec!["stone".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["stone"])?;
         let palette = palette.as_slice();
         blocks.insert((2, 3, 4), &palette, 0);
         assert_eq!(blocks.len(), 1);
@@ -494,7 +498,7 @@ mod test {
     fn contains() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
 
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:iron_ore".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:iron_ore"])?;
         let palette = palette.as_slice();
         blocks.insert((14, 283, 2), &palette, 0);
 
@@ -511,10 +515,8 @@ mod test {
     fn get_all() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
 
-        let palette = PalettedBlocks::generate_palette(vec![
-            "minecraft:iron_ore".into(),
-            "minecraft:coal_ore".into(),
-        ])?;
+        let palette =
+            PalettedBlocks::generate_palette(vec!["minecraft:iron_ore", "minecraft:coal_ore"])?;
         let palette = palette.as_slice();
         assert_eq!(blocks.get_all().len(), 0);
 
@@ -532,7 +534,7 @@ mod test {
     fn insert_at() -> Result<()> {
         let mut blocks = PalettedBlocks::new(0..16, 8);
 
-        let palette = PalettedBlocks::generate_palette(vec!["custom:spawner".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["custom:spawner"])?;
         let palette = palette.as_slice();
         let palette_index = blocks.insert((4, 1, 2), &palette, 0);
         assert_eq!(blocks.len(), 1);
@@ -547,10 +549,8 @@ mod test {
     fn insert() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
 
-        let palette = PalettedBlocks::generate_palette(vec![
-            "minecraft:grass_block".into(),
-            "minecraft:fern".into(),
-        ])?;
+        let palette =
+            PalettedBlocks::generate_palette(vec!["minecraft:grass_block", "minecraft:fern"])?;
         let palette = palette.as_slice();
         blocks.insert((4, 1, 2), &palette, 0);
         assert_eq!(blocks.len(), 1);
@@ -567,7 +567,7 @@ mod test {
     #[test]
     fn insert_fill() -> Result<()> {
         let mut blocks = PalettedBlocks::new(0..64, 16);
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:stone".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:stone"])?;
         let palette = palette.as_slice();
 
         let pal_index = blocks.insert_palette_only(&palette);
@@ -587,7 +587,7 @@ mod test {
     #[test]
     fn insert_palette() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:stone".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:stone"])?;
         let palette = palette.as_slice();
 
         assert_eq!(blocks.palette.len(), 0);
@@ -597,7 +597,7 @@ mod test {
         blocks.insert_palette_only(&palette);
         assert_eq!(blocks.palette.len(), 1);
 
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:dirt".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:dirt"])?;
         let palette = palette.as_slice();
 
         blocks.insert_palette_only(&palette);
@@ -609,7 +609,7 @@ mod test {
     #[test]
     fn get() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block"])?;
         let palette = palette.as_slice();
         blocks.insert((4, 1, 2), &palette, 0);
 
@@ -625,7 +625,7 @@ mod test {
     #[test]
     fn remove() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block"])?;
         let palette = palette.as_slice();
 
         blocks.insert((5, 1, 5), &palette, 0);
@@ -647,10 +647,8 @@ mod test {
 
     #[test]
     fn generate_palette() -> Result<()> {
-        let palette = PalettedBlocks::generate_palette(vec![
-            "minecraft:grass_block".into(),
-            "minecraft:stone".into(),
-        ])?;
+        let palette =
+            PalettedBlocks::generate_palette(vec!["minecraft:grass_block", "minecraft:stone"])?;
         assert_eq!(palette.len(), 2);
         assert_eq!(
             Block::from_compound(&palette[0])?,
@@ -662,7 +660,7 @@ mod test {
     #[test]
     fn iter() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
-        let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block".into()])?;
+        let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block"])?;
         let palette = palette.as_slice();
 
         for x in 0..8 {
@@ -715,10 +713,10 @@ mod test {
     #[test]
     fn palette_shift() -> Result<()> {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
-        let palette_1 = PalettedBlocks::generate_palette(vec!["minecraft:grass_block".into()])?;
+        let palette_1 = PalettedBlocks::generate_palette(vec!["minecraft:grass_block"])?;
         let palette_1 = palette_1.as_slice();
 
-        let palette_2 = PalettedBlocks::generate_palette(vec!["minecraft:stone".into()])?;
+        let palette_2 = PalettedBlocks::generate_palette(vec!["minecraft:stone"])?;
         let palette_2 = palette_2.as_slice();
 
         blocks.insert((5, 283, 8), &palette_1, 0);
