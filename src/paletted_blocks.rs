@@ -288,7 +288,7 @@ impl<'a> PalettedBlocks<'a> {
             Some(i) => PalettedBlocks::deconstruct_block_val(*i),
             None => return None,
         };
-        println!("{palette:?} {palette_index:?} ({block_index})");
+        //println!("{palette:?} {palette_index:?} ({block_index})");
 
         Some(&self.palette[palette as usize].0[palette_index as usize])
     }
