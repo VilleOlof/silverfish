@@ -407,6 +407,37 @@ impl<'a> PalettedBlocks<'a> {
             })
             .collect::<Result<Vec<NbtCompound>>>()?)
     }
+
+    /// Merges multiple [`PalettedBlocks`] into one.  
+    ///
+    /// The `unchecked` part refers to that it doesn't check for multiple palette references.  
+    /// And assume that the caller knows what they're doing and wont do that <3
+    ///
+    /// Merges `palette` (extends self with other.palette), `blocks` (copies all blocks that are non u32::MAX) and `placed_blocks` (enabled bits)
+    pub fn merge_unchecked(&mut self, palettes: Vec<PalettedBlocks<'a>>) {
+        for palette in palettes {
+            let palette_offset = self.palette.len();
+            self.palette.extend(palette.palette);
+
+            for index in palette.placed_blocks.ones() {
+                // convert the other index to a self index since theyre different due to sizes
+                let coords =
+                    PalettedBlocks::to_coords(palette.bottom_y, palette.width, index as u32);
+                let self_index =
+                    PalettedBlocks::to_index(self.bottom_y, self.width, coords) as usize;
+
+                // since the palette indexes will be off if we extend the self.palette
+                // we need to account for that and shift its index by the amount of palettes before it.
+                let (mut palette, pi) =
+                    PalettedBlocks::deconstruct_block_val(palette.blocks[index]);
+                palette += palette_offset as u16;
+                let new_val = PalettedBlocks::construct_block_val(palette, pi);
+                self.blocks[self_index] = new_val;
+
+                self.placed_blocks.insert(self_index);
+            }
+        }
+    }
 }
 
 /// A struct that holds a ref to [`PalettedBlocks`]  
