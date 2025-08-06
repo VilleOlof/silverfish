@@ -314,6 +314,18 @@ impl Debug for Region {
     }
 }
 
+impl Into<(Coords, Block)> for BlockWithCoordinate {
+    fn into(self) -> (Coords, Block) {
+        (self.coordinates, self.block)
+    }
+}
+
+impl<'a> Into<(&'a Coords, &'a Block)> for &'a BlockWithCoordinate {
+    fn into(self) -> (&'a Coords, &'a Block) {
+        (&self.coordinates, &self.block)
+    }
+}
+
 // returns the bit count for whatever palette_len.
 // we dont actually need to calculate anything fancy
 // palette_len cant be more than 4096 so we can pre set it up
