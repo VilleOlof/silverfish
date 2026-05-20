@@ -29,7 +29,7 @@ pub struct NbtString(pub(crate) Vec<u8>);
 /// Otherwise if you don't know, construct a [`Name::Id`] and  
 /// let it auto-translate it to a namespaced on if it doesn't already contain a namespace
 /// The to namespace translation only happens once the name is actually writtent to NBT.  
-#[derive(Clone, Eq, Hash)]
+#[derive(Clone, Eq)]
 pub enum Name {
     /// A block name which has a namespace at the start `<namespace>:<id>`
     Namespaced(NbtString),
@@ -41,10 +41,7 @@ impl NbtString {
     /// Creates a new [`NbtString`] from maybe an [`Mutf8Str`]
     pub fn from_mutf8str(string: Option<&Mutf8Str>) -> Option<Self> {
         let data = string.map(|s| s.as_bytes().to_vec());
-        match data {
-            Some(d) => Some(Self(d)),
-            None => None,
-        }
+        data.map(Self)
     }
 
     /// Creates a new [`Mutf8String`] from the [`NbtString]
@@ -59,7 +56,7 @@ impl NbtString {
 
     /// Creates a new [`NbtString`] from [`str`]
     pub fn from_str(value: &str) -> Result<Self> {
-        NbtString::from_mutf8str(Some(&Mutf8Str::from_str(&value))).ok_or(Error::InvalidNbtType(
+        NbtString::from_mutf8str(Some(&Mutf8Str::from_str(value))).ok_or(Error::InvalidNbtType(
             "Failed to convert str to mutf8str & nbtstring",
         ))
     }
@@ -114,8 +111,8 @@ impl Block {
     ) -> Result<Self> {
         let mut props = BTreeMap::new();
         for (k, v) in properties {
-            let k = NbtString::from_str(&k)?;
-            let v = NbtString::from_str(&v)?;
+            let k = NbtString::from_str(k)?;
+            let v = NbtString::from_str(v)?;
             props.insert(k, v);
         }
 
@@ -147,14 +144,14 @@ impl Block {
     pub(crate) fn populate_namespace(id: &str) -> Cow<'_, str> {
         // we first check if its just a minecraft namespace since its :
         // is on the 9th index and we can easily skip any further iterations.
-        if let Some(maybe_colon) = id.chars().nth(9) {
-            if maybe_colon == ':' {
-                return Cow::Borrowed(id);
-            }
+        if let Some(maybe_colon) = id.chars().nth(9)
+            && maybe_colon == ':'
+        {
+            return Cow::Borrowed(id);
         }
 
         if !id.contains(":") {
-            Cow::Owned(String::from("minecraft:") + &id)
+            Cow::Owned(String::from("minecraft:") + id)
         } else {
             Cow::Borrowed(id)
         }
@@ -265,8 +262,8 @@ impl Name {
     /// A reference to the internal [`NbtString`] value
     pub fn as_nbt_string(&self) -> &NbtString {
         match self {
-            Name::Namespaced(n) => &n,
-            Name::Id(n) => &n,
+            Name::Namespaced(n) => n,
+            Name::Id(n) => n,
         }
     }
 

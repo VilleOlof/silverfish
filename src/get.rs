@@ -56,14 +56,14 @@ fn find_blocks<'a, const N: usize>(
         // this is just so rust allows us to keep a ref outside this loop
         // since it deems that "chunk" and thus the palette data goes out
         // of scope and gets "drops" before this function returns.
-        let palette_ptr = palette as *const _ as *const [NbtCompound];
+        let palette_ptr = palette as *const _;
         let pal_index = found_blocks.insert_palette_only(unsafe { &*palette_ptr });
 
         for c in blocks_to_get {
             // x and z have already been &'d but y is section specific
             let index = (c.x & CHUNK_OP as u32)
                 + ((c.z & CHUNK_OP as u32) * ChunkData::WIDTH as u32)
-                + ((c.y & CHUNK_OP as i32) as u32 * (ChunkData::WIDTH.pow(2)) as u32);
+                + ((c.y & CHUNK_OP) as u32 * (ChunkData::WIDTH.pow(2)) as u32);
 
             let palette_index: usize = *indexes.get(index as usize).ok_or(Error::OutOfBounds {
                 len: indexes.len(),
@@ -99,13 +99,12 @@ impl Region {
     {
         let coords: Coords = coords.into();
         // a bit unsure of this funky stuff but uhh, surely works
-        self.get_blocks(&[coords.clone()])
-            .map(|b| match b.get(coords) {
-                Ok(Some(b)) => b,
-                _ => unreachable!(
-                    "If this was panicked, something VERY wrong with 'PalettedBlocks' happened"
-                ),
-            })
+        self.get_blocks(&[coords]).map(|b| match b.get(coords) {
+            Ok(Some(b)) => b,
+            _ => unreachable!(
+                "If this was panicked, something VERY wrong with 'PalettedBlocks' happened"
+            ),
+        })
     }
 
     // you could make get_blocks even more generic and maybe faster for the user.
@@ -231,11 +230,10 @@ impl Region {
                         + y * BiomeCell::CELL_SIZE * BiomeCell::CELL_SIZE)
                         as usize;
 
-                    let palette_index: usize =
-                        *indexes.get(index as usize).ok_or(Error::OutOfBounds {
-                            len: indexes.len(),
-                            index: index as usize,
-                        })? as usize;
+                    let palette_index: usize = *indexes.get(index).ok_or(Error::OutOfBounds {
+                        len: indexes.len(),
+                        index,
+                    })? as usize;
                     let id = palette.get(palette_index).ok_or(Error::OutOfBounds {
                         len: palette.len(),
                         index: palette_index,
@@ -271,13 +269,12 @@ impl ChunkData {
         C: Into<Coords>,
     {
         let coords: Coords = coords.into();
-        self.get_blocks(&[coords.clone()])
-            .map(|b| match b.get(coords) {
-                Ok(Some(b)) => b,
-                _ => unreachable!(
-                    "If this was panicked, something VERY wrong with 'PalettedBlocks' happened"
-                ),
-            })
+        self.get_blocks(&[coords]).map(|b| match b.get(coords) {
+            Ok(Some(b)) => b,
+            _ => unreachable!(
+                "If this was panicked, something VERY wrong with 'PalettedBlocks' happened"
+            ),
+        })
     }
 
     /// Returns the blocks at the specified coordinates *(local to within the **chunk**)*.  
@@ -425,7 +422,7 @@ pub fn group_chunk<C>(blocks: &[C]) -> GetChunkGroup
 where
     C: Into<Coords> + Copy,
 {
-    if blocks.len() == 0 {
+    if blocks.is_empty() {
         // undefined behavior, we cant backtrack from this
         panic!("Tried to group a block array of 0 length")
     }

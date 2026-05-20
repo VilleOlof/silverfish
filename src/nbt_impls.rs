@@ -1,6 +1,11 @@
 use crate::{Block, Name, NbtString};
 use simdnbt::{Mutf8Str, Mutf8String, owned::NbtCompound};
-use std::{borrow::Cow, collections::BTreeMap, fmt::Debug, hash::Hash};
+use std::{
+    borrow::Cow,
+    collections::BTreeMap,
+    fmt::Debug,
+    hash::{Hash, Hasher},
+};
 
 impl Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -31,21 +36,21 @@ impl Debug for Block {
     }
 }
 
-impl Into<Block> for &str {
-    fn into(self) -> Block {
-        Block::new(self)
+impl From<&str> for Block {
+    fn from(val: &str) -> Self {
+        Block::new(val)
     }
 }
 
-impl Into<Block> for String {
-    fn into(self) -> Block {
-        Block::new(self)
+impl From<String> for Block {
+    fn from(val: String) -> Self {
+        Block::new(val)
     }
 }
 
-impl Into<Block> for Name {
-    fn into(self) -> Block {
-        Block::new(self)
+impl From<Name> for Block {
+    fn from(val: Name) -> Self {
+        Block::new(val)
     }
 }
 
@@ -116,33 +121,33 @@ impl PartialEq<NbtString> for &Mutf8Str {
     }
 }
 
-impl Into<Mutf8String> for NbtString {
-    fn into(self) -> Mutf8String {
-        Self::to_mutf8string(self)
+impl From<NbtString> for Mutf8String {
+    fn from(val: NbtString) -> Self {
+        NbtString::to_mutf8string(val)
     }
 }
 
-impl Into<NbtString> for &str {
-    fn into(self) -> NbtString {
-        NbtString::from_str(&self).expect("Failed to convert str to NbtString")
+impl From<&str> for NbtString {
+    fn from(val: &str) -> Self {
+        NbtString::from_str(val).expect("Failed to convert str to NbtString")
     }
 }
 
-impl Into<NbtString> for String {
-    fn into(self) -> NbtString {
-        NbtString::from_str(&self).expect("Failed to convert string to NbtString")
+impl From<String> for NbtString {
+    fn from(val: String) -> Self {
+        NbtString::from_str(&val).expect("Failed to convert string to NbtString")
     }
 }
 
-impl Into<NbtString> for &Mutf8Str {
-    fn into(self) -> NbtString {
-        NbtString::from_mutf8str(Some(self)).expect("Failed to convert mutf8str to NbtString")
+impl From<&Mutf8Str> for NbtString {
+    fn from(val: &Mutf8Str) -> Self {
+        NbtString::from_mutf8str(Some(val)).expect("Failed to convert mutf8str to NbtString")
     }
 }
 
-impl Into<NbtString> for Mutf8String {
-    fn into(self) -> NbtString {
-        NbtString::from_mutf8str(Some(self.as_str()))
+impl From<Mutf8String> for NbtString {
+    fn from(val: Mutf8String) -> Self {
+        NbtString::from_mutf8str(Some(val.as_str()))
             .expect("Failed to convert mutf8string to NbtString")
     }
 }
@@ -153,30 +158,36 @@ impl Debug for Name {
     }
 }
 
-impl Into<Mutf8String> for Name {
-    fn into(self) -> Mutf8String {
-        match self {
+impl From<Name> for Mutf8String {
+    fn from(val: Name) -> Self {
+        match val {
             Name::Namespaced(n) => n.to_mutf8string(),
             Name::Id(n) => n.to_mutf8string(),
         }
     }
 }
 
-impl Into<Name> for String {
-    fn into(self) -> Name {
-        Name::Id(self.into())
+impl From<String> for Name {
+    fn from(val: String) -> Self {
+        Name::Id(val.into())
     }
 }
 
-impl Into<Name> for &str {
-    fn into(self) -> Name {
-        Name::Id(self.into())
+impl From<&str> for Name {
+    fn from(val: &str) -> Self {
+        Name::Id(val.into())
     }
 }
 
-impl Into<Name> for NbtString {
-    fn into(self) -> Name {
-        Name::Id(self)
+impl From<NbtString> for Name {
+    fn from(val: NbtString) -> Self {
+        Name::Id(val)
+    }
+}
+
+impl Hash for Name {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.to_str().hash(state);
     }
 }
 
@@ -219,7 +230,7 @@ impl PartialEq<&NbtCompound> for &Block {
             let mut other_map: BTreeMap<NbtString, NbtString> = BTreeMap::new();
 
             for (k, v) in props.iter() {
-                let k = match NbtString::from_mutf8str(Some(&k)) {
+                let k = match NbtString::from_mutf8str(Some(k)) {
                     Some(k) => k,
                     None => return false,
                 };

@@ -105,7 +105,7 @@ impl Region {
             for z in chunk_z.clone() {
                 let mut chunk = self.get_chunk_mut(x, z)?;
 
-                let mut map = AHashMap::new();
+                let mut map = AHashMap::with_capacity(sections.len());
                 for y in sections.clone() {
                     map.insert(y, Vec::with_capacity(blocks_per_section));
                 }
@@ -142,7 +142,7 @@ impl Region {
             for z in chunk_z.clone() {
                 let mut chunk = self.get_chunk_mut(x, z)?;
 
-                let mut map = AHashMap::new();
+                let mut map = AHashMap::with_capacity(sections.len());
                 for y in sections.clone() {
                     map.insert(y, Vec::with_capacity(cells_per_section));
                 }

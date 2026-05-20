@@ -5,7 +5,7 @@
 use crate::{Block, BlockWithCoordinate, Coords, Error, Result};
 use fixedbitset::{FixedBitSet, Ones};
 use simdnbt::owned::NbtCompound;
-use std::{ops::Range, u32};
+use std::ops::Range;
 
 /// This can become quite memory hungry when used on bigger areas of blocks at a time.  
 ///
@@ -148,10 +148,7 @@ impl<'a> PalettedBlocks<'a> {
     /// Converts all the blocks into a list of [`BlockWithCoordinate`]
     pub fn get_all(&self) -> Vec<BlockWithCoordinate> {
         self.into_iter()
-            .map(|(coordinates, block)| BlockWithCoordinate {
-                coordinates: coordinates,
-                block,
-            })
+            .map(|(coordinates, block)| BlockWithCoordinate { coordinates, block })
             .collect()
     }
 
@@ -271,10 +268,7 @@ impl<'a> PalettedBlocks<'a> {
     where
         C: Into<Coords>,
     {
-        Ok(self
-            .get_raw(coords)
-            .map(|c| Block::from_compound(c))
-            .transpose()?)
+        self.get_raw(coords).map(Block::from_compound).transpose()
     }
 
     /// Returns the raw [`Block`] [Nbt](NbtCompound) if a block in the list exists at these coordinates.  
@@ -380,7 +374,7 @@ impl<'a> PalettedBlocks<'a> {
                 index: palette_index as usize,
             })?;
 
-        Ok(Block::from_compound(block)?)
+        Block::from_compound(block)
     }
 
     /// Takes in a list of blocks and creating a NBT palette list from it.  
@@ -399,13 +393,13 @@ impl<'a> PalettedBlocks<'a> {
     where
         B: Into<Block>,
     {
-        Ok(blocks
+        blocks
             .into_iter()
             .map(|b| {
                 let block: Block = b.into();
                 block.to_compound()
             })
-            .collect::<Result<Vec<NbtCompound>>>()?)
+            .collect::<Result<Vec<NbtCompound>>>()
     }
 
     /// Merges multiple [`PalettedBlocks`] into one.  
@@ -453,10 +447,7 @@ impl<'a> Iterator for PalettedBlocksIntoIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         // we can just hijack the iter for enabled bits on the placed_blocks bitset.
         // way way WAYY faster than iterating over `blocks` and checking if its u32::MAX etc.
-        let index = match self.placed_iter.next() {
-            Some(i) => i,
-            None => return None,
-        };
+        let index = self.placed_iter.next()?;
 
         let coords =
             PalettedBlocks::to_coords(self.blocks.bottom_y, self.blocks.width, index as u32);
@@ -478,7 +469,7 @@ impl<'a> Iterator for PalettedBlocksIntoIter<'a> {
             Err(_) => return None,
         };
 
-        return Some((coords, block));
+        Some((coords, block))
     }
 }
 
@@ -489,7 +480,7 @@ impl<'a> IntoIterator for &'a PalettedBlocks<'a> {
 
     fn into_iter(self) -> Self::IntoIter {
         PalettedBlocksIntoIter {
-            blocks: &self,
+            blocks: self,
             placed_iter: self.placed_blocks.ones(),
         }
     }
@@ -516,7 +507,7 @@ mod test {
 
         let palette = PalettedBlocks::generate_palette(vec!["stone"])?;
         let palette = palette.as_slice();
-        blocks.insert((2, 3, 4), &palette, 0);
+        blocks.insert((2, 3, 4), palette, 0);
         assert_eq!(blocks.len(), 1);
 
         blocks.remove((2, 3, 4))?;
@@ -531,7 +522,7 @@ mod test {
 
         let palette = PalettedBlocks::generate_palette(vec!["minecraft:iron_ore"])?;
         let palette = palette.as_slice();
-        blocks.insert((14, 283, 2), &palette, 0);
+        blocks.insert((14, 283, 2), palette, 0);
 
         assert!(blocks.contains(&Block::new("minecraft:iron_ore")));
         assert!(!blocks.contains(&Block::new("minecraft:diamond_ore")));
@@ -551,11 +542,11 @@ mod test {
         let palette = palette.as_slice();
         assert_eq!(blocks.get_all().len(), 0);
 
-        blocks.insert((8, 1, 5), &palette, 1);
+        blocks.insert((8, 1, 5), palette, 1);
         assert_eq!(blocks.get_all().len(), 1);
         assert_eq!(blocks.get_all()[0].coordinates, Coords::new(8, 1, 5));
 
-        blocks.insert((13, -52, 1), &palette, 0);
+        blocks.insert((13, -52, 1), palette, 0);
         assert_eq!(blocks.get_all().len(), 2);
 
         Ok(())
@@ -567,7 +558,7 @@ mod test {
 
         let palette = PalettedBlocks::generate_palette(vec!["custom:spawner"])?;
         let palette = palette.as_slice();
-        let palette_index = blocks.insert((4, 1, 2), &palette, 0);
+        let palette_index = blocks.insert((4, 1, 2), palette, 0);
         assert_eq!(blocks.len(), 1);
 
         blocks.insert_at((5, 1, 2), palette_index, 0);
@@ -583,13 +574,13 @@ mod test {
         let palette =
             PalettedBlocks::generate_palette(vec!["minecraft:grass_block", "minecraft:fern"])?;
         let palette = palette.as_slice();
-        blocks.insert((4, 1, 2), &palette, 0);
+        blocks.insert((4, 1, 2), palette, 0);
         assert_eq!(blocks.len(), 1);
 
-        blocks.insert((4, 1, 2), &palette, 1);
+        blocks.insert((4, 1, 2), palette, 1);
         assert_eq!(blocks.len(), 1);
 
-        blocks.insert((13, -42, 9), &palette, 0);
+        blocks.insert((13, -42, 9), palette, 0);
         assert_eq!(blocks.len(), 2);
 
         Ok(())
@@ -601,7 +592,7 @@ mod test {
         let palette = PalettedBlocks::generate_palette(vec!["minecraft:stone"])?;
         let palette = palette.as_slice();
 
-        let pal_index = blocks.insert_palette_only(&palette);
+        let pal_index = blocks.insert_palette_only(palette);
         for x in 0..16 {
             for y in 0..64 {
                 for z in 0..16 {
@@ -622,16 +613,16 @@ mod test {
         let palette = palette.as_slice();
 
         assert_eq!(blocks.palette.len(), 0);
-        blocks.insert_palette_only(&palette);
+        blocks.insert_palette_only(palette);
         assert_eq!(blocks.palette.len(), 1);
 
-        blocks.insert_palette_only(&palette);
+        blocks.insert_palette_only(palette);
         assert_eq!(blocks.palette.len(), 1);
 
         let palette = PalettedBlocks::generate_palette(vec!["minecraft:dirt"])?;
         let palette = palette.as_slice();
 
-        blocks.insert_palette_only(&palette);
+        blocks.insert_palette_only(palette);
         assert_eq!(blocks.palette.len(), 2);
 
         Ok(())
@@ -642,7 +633,7 @@ mod test {
         let mut blocks = PalettedBlocks::new(-64..320, 16);
         let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block"])?;
         let palette = palette.as_slice();
-        blocks.insert((4, 1, 2), &palette, 0);
+        blocks.insert((4, 1, 2), palette, 0);
 
         let block = blocks.get((4, 1, 2))?;
         assert_eq!(block, Some(Block::new("minecraft:grass_block")));
@@ -659,7 +650,7 @@ mod test {
         let palette = PalettedBlocks::generate_palette(vec!["minecraft:grass_block"])?;
         let palette = palette.as_slice();
 
-        blocks.insert((5, 1, 5), &palette, 0);
+        blocks.insert((5, 1, 5), palette, 0);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks.palette.len(), 1);
 
@@ -667,7 +658,7 @@ mod test {
         assert_eq!(blocks.len(), 0);
         assert_eq!(blocks.palette.len(), 0);
 
-        blocks.insert((5, 1, 5), &palette, 0);
+        blocks.insert((5, 1, 5), palette, 0);
         assert_eq!(blocks.len(), 1);
 
         let val = blocks.remove((0, 0, 0));
@@ -695,7 +686,7 @@ mod test {
         let palette = palette.as_slice();
 
         for x in 0..8 {
-            blocks.insert((x, 5, 8), &palette, 0);
+            blocks.insert((x, 5, 8), palette, 0);
         }
 
         for (idx, (coords, block)) in blocks.into_iter().enumerate() {
@@ -750,12 +741,12 @@ mod test {
         let palette_2 = PalettedBlocks::generate_palette(vec!["minecraft:stone"])?;
         let palette_2 = palette_2.as_slice();
 
-        blocks.insert((5, 283, 8), &palette_1, 0);
-        blocks.insert((5, 1, 8), &palette_1, 0);
+        blocks.insert((5, 283, 8), palette_1, 0);
+        blocks.insert((5, 1, 8), palette_1, 0);
 
         let block_1_c = Coords::new(8, 283, 5);
-        blocks.insert(block_1_c, &palette_2, 0);
-        blocks.insert((8, 1, 5), &palette_2, 0);
+        blocks.insert(block_1_c, palette_2, 0);
+        blocks.insert((8, 1, 5), palette_2, 0);
         assert_eq!(
             PalettedBlocks::deconstruct_block_val(
                 blocks.blocks[PalettedBlocks::to_index(-64, 16, block_1_c) as usize]

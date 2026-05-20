@@ -83,27 +83,27 @@ impl BiomeCell {
     }
 }
 
-impl Into<BiomeCell> for ((u8, u8), i8, (u8, u8, u8)) {
-    fn into(self) -> BiomeCell {
-        BiomeCell::new(self.0, self.1, self.2)
+impl From<((u8, u8), i8, (u8, u8, u8))> for BiomeCell {
+    fn from(val: ((u8, u8), i8, (u8, u8, u8))) -> Self {
+        BiomeCell::new(val.0, val.1, val.2)
     }
 }
 
-impl Into<BiomeCell> for (u32, i32, u32) {
-    fn into(self) -> BiomeCell {
-        BiomeCell::from_coordinates(self)
+impl From<(u32, i32, u32)> for BiomeCell {
+    fn from(val: (u32, i32, u32)) -> Self {
+        BiomeCell::from_coordinates(val)
     }
 }
 
-impl Into<BiomeCell> for Coords {
-    fn into(self) -> BiomeCell {
-        BiomeCell::from_coordinates(self)
+impl From<Coords> for BiomeCell {
+    fn from(val: Coords) -> Self {
+        BiomeCell::from_coordinates(val)
     }
 }
 
-impl Into<BiomeCell> for BlockWithCoordinate {
-    fn into(self) -> BiomeCell {
-        BiomeCell::from_coordinates(self.coordinates)
+impl From<BlockWithCoordinate> for BiomeCell {
+    fn from(val: BlockWithCoordinate) -> Self {
+        BiomeCell::from_coordinates(val.coordinates)
     }
 }
 
@@ -122,7 +122,7 @@ where
     let section = (coords.y as f64 / ChunkData::WIDTH as f64).floor() as i8;
     let cell_coords = (
         ((coords.x & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
-        ((coords.y & CHUNK_OP as i32) / BiomeCell::CELL_SIZE as i32) as u8,
+        ((coords.y & CHUNK_OP) / BiomeCell::CELL_SIZE as i32) as u8,
         ((coords.z & CHUNK_OP as u32) / BiomeCell::CELL_SIZE as u32) as u8,
     );
 
@@ -136,7 +136,8 @@ pub(crate) struct GetChunkGroup {
 }
 
 pub(crate) fn group_cells_into_chunks<C: Into<BiomeCell>>(cells: Vec<C>) -> Vec<GetChunkGroup> {
-    let mut map: AHashMap<(u8, u8), AHashMap<i8, Vec<BiomeCell>>> = AHashMap::new();
+    let mut map: AHashMap<(u8, u8), AHashMap<i8, Vec<BiomeCell>>> =
+        AHashMap::with_capacity(cells.len());
 
     for cell in cells.into_iter() {
         let cell: BiomeCell = cell.into();

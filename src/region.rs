@@ -14,12 +14,12 @@ use dashmap::{
     DashMap,
     mapref::one::{Ref, RefMut},
 };
-use mca::{CompressionType, RegionIter, RegionReader, RegionWriter};
+use mca::{Compression, RegionReader, RegionWriter};
 use simdnbt::owned::{BaseNbt, Nbt, NbtCompound, NbtList, NbtTag};
 use std::{
     fmt::Debug,
     io::{Cursor, Read, Write},
-    ops::{Deref, Range},
+    ops::Range,
 };
 
 /// An in-memory region to read and write blocks to the chunks within.  
@@ -123,7 +123,7 @@ impl Region {
 
     /// Creates a full [`Region`] with empty chunks in it.  
     pub fn full_empty(region_coords: (i32, i32)) -> Self {
-        let mut chunks = AHashMap::new();
+        let mut chunks = AHashMap::with_capacity(mca::REGION_SIZE * mca::REGION_SIZE);
 
         for x in 0..mca::REGION_SIZE as u8 {
             for z in 0..mca::REGION_SIZE as u8 {
@@ -166,22 +166,16 @@ impl Region {
         let mut bytes = Vec::with_capacity(4_194_304); // 4 MB, just an average start on the vec to skip a few common re-allocations
         reader.read_to_end(&mut bytes)?;
         let region_reader = RegionReader::new(&bytes)?;
+        let mut iter = region_reader.iter()?;
 
-        let mut chunks = AHashMap::new();
-        for (i, chunk) in region_reader.iter().enumerate() {
-            let chunk = chunk?;
-            let chunk = match chunk {
-                Some(c) => c.decompress()?,
-                None => continue,
-            };
-
+        let mut chunks = AHashMap::with_capacity(mca::REGION_SIZE * mca::REGION_SIZE);
+        while let Ok(Some(((x, z), chunk))) = iter.next_available_chunk() {
             let chunk_nbt = match simdnbt::owned::read(&mut Cursor::new(&chunk))? {
                 Nbt::Some(nbt) => nbt.as_compound(),
                 Nbt::None => return Err(Error::InvalidNbtType("base_nbt")),
             };
-            let (x, z) = RegionIter::get_chunk_coordinate(i);
 
-            chunks.insert((x as u8, z as u8), chunk_nbt);
+            chunks.insert((x, z), chunk_nbt);
         }
 
         Ok(Self::from_nbt(chunks, region_coords))
@@ -206,7 +200,7 @@ impl Region {
             let mut raw_nbt = vec![];
             let wrapped = Nbt::Some(BaseNbt::new("", chunk_data.nbt));
             wrapped.write(&mut raw_nbt);
-            region_writer.push_chunk_with_compression(&raw_nbt, (x, z), CompressionType::Zlib)?;
+            region_writer.set_chunk(x, z, raw_nbt, Compression::Lz4)?;
         }
 
         region_writer.write(writer)?;
@@ -259,7 +253,7 @@ impl Region {
         }
 
         match self.chunks.get_mut(&(x, z)) {
-            Some(ch) => return Ok(ch),
+            Some(ch) => Ok(ch),
             None if self.config.create_chunk_if_missing => {
                 self.chunks.insert(
                     (x, z),
@@ -272,10 +266,10 @@ impl Region {
                         self.config.world_height.clone(),
                     ),
                 );
-                return Ok(self.chunks.get_mut(&(x, z)).unwrap());
+                Ok(self.chunks.get_mut(&(x, z)).unwrap())
             }
-            None => return Err(Error::TriedToModifyMissingChunk(x, z)),
-        };
+            None => Err(Error::TriedToModifyMissingChunk(x, z)),
+        }
     }
 
     /// Returns if all chunks inside the region has been generated and is [`Region::REQUIRED_STATUS`]
@@ -314,15 +308,15 @@ impl Debug for Region {
     }
 }
 
-impl Into<(Coords, Block)> for BlockWithCoordinate {
-    fn into(self) -> (Coords, Block) {
-        (self.coordinates, self.block)
+impl From<BlockWithCoordinate> for (Coords, Block) {
+    fn from(val: BlockWithCoordinate) -> Self {
+        (val.coordinates, val.block)
     }
 }
 
-impl<'a> Into<(&'a Coords, &'a Block)> for &'a BlockWithCoordinate {
-    fn into(self) -> (&'a Coords, &'a Block) {
-        (&self.coordinates, &self.block)
+impl<'a> From<&'a BlockWithCoordinate> for (&'a Coords, &'a Block) {
+    fn from(val: &'a BlockWithCoordinate) -> Self {
+        (&val.coordinates, &val.block)
     }
 }
 
@@ -393,7 +387,7 @@ pub fn get_empty_chunk(
         ]));
     }
 
-    let chunk = NbtCompound::from_values(vec![
+    NbtCompound::from_values(vec![
         (
             "Status".into(),
             NbtTag::String(Region::REQUIRED_STATUS.into()),
@@ -410,9 +404,7 @@ pub fn get_empty_chunk(
             "zPos".into(),
             NbtTag::Int((region_coords.1 * mca::REGION_SIZE as i32) + coords.1 as i32),
         ),
-    ]);
-
-    chunk
+    ])
 }
 
 /// Converts a piece of global world coordinates to coordinates within it's region.  
@@ -426,9 +418,9 @@ pub fn get_empty_chunk(
 /// ```
 pub fn to_region_local(coords: (i32, i32, i32)) -> Coords {
     (
-        (coords.0 as i32 & (BLOCKS_PER_REGION - 1) as i32) as u32,
+        (coords.0 & (BLOCKS_PER_REGION - 1) as i32) as u32,
         coords.1,
-        (coords.2 as i32 & (BLOCKS_PER_REGION - 1) as i32) as u32,
+        (coords.2 & (BLOCKS_PER_REGION - 1) as i32) as u32,
     )
         .into()
 }
@@ -461,30 +453,32 @@ pub(crate) fn is_valid_chunk(chunk: &NbtCompound, coordinate: (u8, u8)) -> Resul
 
 /// Removes unused elements from the palette and "cleans" it.  
 pub(crate) fn clean_palette<T>(data: &mut [i64], data_len: usize, palette: &mut Vec<T>) {
-    let mut palette_count: Vec<i32> = vec![0; palette.len()];
-    for index in data.deref() {
-        palette_count[*index as usize] += 1;
-    }
+    debug_assert!(data_len <= data.len());
 
-    let mut palette_offsets: Vec<i64> = vec![0; palette.len()];
+    let mut palette_count = vec![0; palette.len()];
+    data.iter()
+        .take(data_len)
+        .for_each(|&val| palette_count[val as usize] += 1);
 
-    let mut len = palette.len();
-    let mut i = len as i32 - 1;
-    while i >= 0 {
-        if palette_count[i as usize] == 0 {
-            palette.remove(i as usize);
-            len -= 1;
-
-            for j in (i as usize)..palette_count.len() {
-                palette_offsets[j as usize] += 1;
-            }
+    let mut palette_offsets = vec![0; palette.len()];
+    let mut removed = 0i64;
+    for (i, count) in palette_count.iter().enumerate() {
+        palette_offsets[i] = removed;
+        if *count == 0 {
+            removed += 1;
         }
-        i -= 1;
     }
 
-    for block in 0..data_len {
-        data[block] -= palette_offsets[data[block] as usize];
-    }
+    data[..data_len]
+        .iter_mut()
+        .for_each(|val| *val -= palette_offsets[*val as usize]);
+
+    let mut idx = 0;
+    palette.retain(|_| {
+        let keep = palette_count[idx] > 0;
+        idx += 1;
+        keep
+    });
 }
 
 impl Default for Region {
